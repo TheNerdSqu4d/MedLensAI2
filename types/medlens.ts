@@ -15,6 +15,10 @@ export interface Medicine {
   expiryDate: string | null; // YYYY-MM-DD or null if unknown
   category: string; // Huyết áp, Dạ dày, Tiểu đường, Tim mạch & Mỡ máu, v.v.
   isTaken?: boolean; // Individual dose state
+  isSkipped?: boolean; // Dose skipped by user
+  snoozedUntil?: string; // Time snoozed until, e.g. "07:40"
+  ownerId?: string; // 'tam' | 'bo' | 'me' | 'shared' (Tủ dự phòng chung)
+  treatmentCourse?: string; // Đợt thuốc / Liệu trình theo dõi định kỳ
 }
 
 export interface SingleMedicineDetail extends Medicine {
@@ -45,11 +49,13 @@ export interface InteractionWarning {
 export interface PrescriptionAnalysisResult {
   scanType?: ScanFlowType;
   isValidPrescription?: boolean;
+  isHandwritten?: boolean;
+  handwritingWarning?: string;
   patientName?: string | null;
   patientAge?: number | null;
   prescriptionDate?: string | null;
-  doctorName?: string;
-  diagnosis?: string;
+  doctorName?: string | null;
+  diagnosis?: string | null;
   medicines: (Medicine & { timeSlots: TimeSlot[] })[];
   warnings: InteractionWarning[];
   singleMedicine?: SingleMedicineDetail;
@@ -82,6 +88,7 @@ export interface FamilyMember {
   avatarColor?: string;
   role?: 'patient' | 'caregiver';
   healthProfile?: HealthProfile;
+  mealTimes?: MealTimes;
 }
 
 export interface MealTimes {
@@ -115,6 +122,8 @@ export interface MedState {
   setMorningReminderEnabled: (enabled: boolean) => void;
   toggleDoseSlot: (slot: TimeSlot) => void;
   toggleMedicineTaken: (slot: TimeSlot, medicineId: string) => void;
+  snoozeMedicine: (slot: TimeSlot, medicineId: string, minutes?: number) => void;
+  skipMedicine: (slot: TimeSlot, medicineId: string) => void;
   importPrescription: (analysis: PrescriptionAnalysisResult) => void;
   addSingleMedicine: (
     medicine: Medicine,
@@ -134,8 +143,9 @@ export interface MedState {
   resetToDemo: () => void;
   setSelectedMedicine: (medicine: Medicine | null) => void;
   setActiveMember: (memberId: string) => void;
-  addFamilyMember: (name: string, relation: string, healthProfile?: HealthProfile) => void;
+  addFamilyMember: (name: string, relation: string, healthProfile?: HealthProfile, mealTimes?: MealTimes) => void;
   updateHealthProfile: (memberId: string, profile: Partial<HealthProfile>) => void;
   setNotificationScope: (scope: 'all' | 'me') => void;
+  updateMemberMealTimes?: (memberId: string, times: Partial<MealTimes>) => void;
   updateMedicineCount?: (medicineId: string, count: number) => void;
 }

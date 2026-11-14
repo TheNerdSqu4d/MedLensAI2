@@ -24,4 +24,7 @@ MockNotifications.MockNotifications = MockNotifications;
 
 export { MockNotifications };
 export default MockNotifications;
-module.exports = MockNotifications;
+declare const module: any;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = MockNotifications;
+}

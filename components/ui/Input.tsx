@@ -32,21 +32,21 @@ export function Input({
   return (
     <View className={`w-full ${containerClassName}`}>
       {label && (
-        <Text className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1.5 px-1">
+        <Text className="text-xs font-bold uppercase tracking-wider text-zinc-600 mb-2 px-1">
           {label}
         </Text>
       )}
 
       <View
-        className={`flex-row items-center rounded-2xl border bg-white px-3.5 py-2.5 shadow-sm transition-all ${
+        className={`flex-row items-center rounded-2xl border bg-white px-4 py-3.5 shadow-sm transition-all ${
           error
             ? 'border-red-500 bg-red-50/20'
             : isFocused
             ? 'border-blue-600 ring-2 ring-blue-500/10'
-            : 'border-slate-200/80'
+            : 'border-slate-200/90'
         }`}
       >
-        {icon && <View className="mr-2.5 text-zinc-400">{icon}</View>}
+        {icon && <View className="mr-3 text-zinc-400">{icon}</View>}
 
         <TextInput
           value={value}
@@ -55,7 +55,7 @@ export function Input({
           onBlur={() => setIsFocused(false)}
           placeholderTextColor="#94A3B8"
           textAlignVertical="center"
-          className="flex-1 text-base text-zinc-900 py-1"
+          className="flex-1 text-base text-zinc-900 py-0.5"
           {...props}
         />
 

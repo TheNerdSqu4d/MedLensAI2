@@ -77,17 +77,27 @@ ${cabinetListText}
 ----------------------------------------------------
 
 YÊU CẦU BÓC TÁCH & PHÂN TÍCH Y KHOA:
-0. PHÂN LOẠI HÌNH ẢNH (BẮT BUỘC KIỂM TRA ĐẦU TIÊN):
-   - Đánh giá loại hình ảnh:
-     + Nếu ảnh KHÔNG liên quan đến y tế (sách vở, phong cảnh, đồ vật, người, quá mờ không đọc được...):
-       "scanType": "unrecognized", "isValidPrescription": false, "medicines": [], "doctorName": null, "diagnosis": "Không phát hiện đơn thuốc hoặc bao bì thuốc hợp lệ.", "warnings": []. Kết thúc xử lý ngay.
-     + Nếu ảnh là ĐƠN THUỐC Y TẾ / TOA THUỐC BỆNH VIỆN / PHIẾU KHÁM BỆNH (có danh sách thuốc, bác sĩ kê đơn hoặc chẩn đoán):
-       "scanType": "prescription", "isValidPrescription": true.
-     + Nếu ảnh là LỌ THUỐC, CHAI THUỐC, VỎ HỘP THUỐC, VỈ THUỐC HOẶC BAO BÌ DƯỢC PHẨM ĐƠN LẺ:
-       "scanType": "single_medicine", "isValidPrescription": true.
+0. PHÂN LOẠI HÌNH ẢNH & ĐỘ RÕ NÉT (BẮT BUỘC KIỂM TRA ĐẦU TIÊN):
+   - NGUYÊN TẮC AN TOÀN TUYỆT ĐỐI: Nếu ảnh KHÔNG đọc rõ chữ, chữ bị nhòe/mờ/chói lóa/thiếu góc, hoặc KHÔNG liên quan đến y tế:
+     TUYỆT ĐỐI KHÔNG ĐƯỢC ĐOÁN MÒ HOẶC TỰ SUY DIỄN THÔNG TIN THUỐC.
+     BẮT BUỘC TRẢ VỀ:
+     "scanType": "unrecognized",
+     "isValidPrescription": false,
+     "medicines": [],
+     "doctorName": null,
+     "diagnosis": null,
+     "errorMessage": "Không nhận diện được đơn thuốc / bao bì thuốc do hình ảnh không đọc rõ chữ. Vui lòng chụp lại rõ nét hơn hoặc tự nhập thuốc bằng tay.",
+     "warnings": []
+     -> KẾT THÚC XỬ LÝ NGAY.
+   - Nếu ảnh là ĐƠN THUỐC Y TẾ / TOA THUỐC BỆNH VIỆN / PHIẾU KHÁM BỆNH đọc rõ chữ (có danh sách thuốc, bác sĩ kê đơn hoặc chẩn đoán):
+     "scanType": "prescription", "isValidPrescription": true.
+   - Nếu ảnh là LỌ THUỐC, CHAI THUỐC, VỎ HỘP THUỐC, VỈ THUỐC HOẶC BAO BÌ DƯỢC PHẨM ĐƠN LẺ đọc rõ chữ:
+     "scanType": "single_medicine", "isValidPrescription": true.
 
 1. NẾU LÀ ĐƠN THUỐC (scanType = "prescription"):
-   - doctorName: Tên bác sĩ kê đơn kèm chức danh/khoa nếu thấy. Nếu không ghi tên bác sĩ, để "Bác sĩ phụ trách".
+   - doctorName: Tên bác sĩ kê đơn kèm chức danh/khoa nếu thấy rõ. NẾU KHÔNG CÓ TÊN BÁC SĨ (hoặc không ghi rõ tên), BẮT BUỘC TRẢ VỀ: "Không có" hoặc null. TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ BỊA "Bác sĩ khám bệnh" hay "Bác sĩ phụ trách".
+   - isHandwritten: boolean. BẮT BUỘC KIỂM TRA: Đơn thuốc này là VIẾT TAY (handwritten) hay in từ máy vi tính (printed)? Nếu là chữ viết tay (đặc biệt nếu nét chữ viết tay nguệch ngoạc, khó đọc, hoặc dễ sai lệch tên thuốc), BẮT BUỘC ĐẶT: true. Nếu là văn bản đánh máy in rõ nét, đặt: false.
+   - handwritingWarning: Nếu isHandwritten là true, điền cảnh báo: "Đơn thuốc viết tay: Chữ viết bác sĩ có thể khó đọc hoặc nguệch ngoạc, tên thuốc và liều lượng có thể sai lệch hoặc không thể quét chính xác 100%. Vui lòng kiểm tra kỹ hoặc bấm 'Chi tiết / Sửa' để chủ động sửa lại tên thuốc nếu cần." Nếu không phải viết tay, để null.
    - diagnosis: Chẩn đoán lâm sàng ghi trên đơn. Nếu không ghi, tóm tắt bệnh lý theo nhóm thuốc.
    - patientName: Tên bệnh nhân ghi trên đơn (nếu có), nếu không thấy để null.
    - patientAge: Tuổi bệnh nhân (số nguyên), nếu không thấy để null.
@@ -128,7 +138,9 @@ YÊU CẦU BÓC TÁCH & PHÂN TÍCH Y KHOA:
    {
      "scanType": "prescription" | "single_medicine" | "unrecognized",
      "isValidPrescription": true,
-     "doctorName": "string hoặc null",
+     "isHandwritten": false,
+     "handwritingWarning": null,
+     "doctorName": "BS.CKII Trần Văn Minh (hoặc 'Không có' nếu không có tên)",
      "diagnosis": "string hoặc null",
      "patientName": "string hoặc null",
      "patientAge": 40,
@@ -311,6 +323,22 @@ YÊU CẦU BÓC TÁCH & PHÂN TÍCH Y KHOA:
         parsedData.patientName = parsedData.patientName || null;
         parsedData.patientAge = typeof parsedData.patientAge === 'number' ? parsedData.patientAge : null;
         parsedData.prescriptionDate = parsedData.prescriptionDate || null;
+        parsedData.isHandwritten = Boolean(parsedData.isHandwritten);
+        parsedData.handwritingWarning = parsedData.isHandwritten
+          ? (parsedData.handwritingWarning ||
+             'Đơn thuốc viết bằng tay chữ có thể nguệch ngoạc khó đọc, tên thuốc hoặc liều lượng có thể sai lệch và không thể quét chính xác 100%. Vui lòng kiểm tra kỹ hoặc bấm "Chi tiết / Sửa" để chủ động sửa lại tên thuốc.')
+          : null;
+
+        if (
+          !parsedData.doctorName ||
+          typeof parsedData.doctorName !== 'string' ||
+          !parsedData.doctorName.trim() ||
+          parsedData.doctorName.toLowerCase().includes('bác sĩ khám bệnh') ||
+          parsedData.doctorName.toLowerCase().includes('bác sĩ phụ trách') ||
+          parsedData.doctorName.toLowerCase().includes('không rõ')
+        ) {
+          parsedData.doctorName = 'Không có';
+        }
       }
 
       parsedData.medicines = parsedData.medicines.map((med: any, index: number) => ({

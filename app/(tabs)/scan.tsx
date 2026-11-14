@@ -34,6 +34,9 @@ import {
   User,
   Check,
   AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Edit3,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -57,6 +60,112 @@ import { analyzePrescription } from '@/services/ai';
 import { MedicineDetailModal } from '@/components/features/MedicineDetailModal';
 
 type ScanStage = 'capture' | 'scanning' | 'result';
+
+const MANUAL_CATEGORIES = [
+  'Huyết áp',
+  'Dạ dày',
+  'Tiểu đường',
+  'Kháng sinh',
+  'Giảm đau',
+  'Tim mạch',
+  'Khác',
+];
+
+// Collapsible Drug Interaction Warning with big, clear text
+function DrugInteractionWarningSection({
+  warnings,
+}: {
+  warnings: any[];
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // If no warnings, automatically hidden
+  if (!warnings || warnings.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card className="p-4 bg-amber-50/90 border border-amber-300 shadow-sm rounded-3xl overflow-hidden mb-3">
+      {/* Header bar with Arrow button: initially collapsed */}
+      <Pressable
+        onPress={() => {
+          try {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          } catch {}
+          setIsExpanded(!isExpanded);
+        }}
+        className="flex-row items-center justify-between active:opacity-75"
+      >
+        <View className="flex-row items-center gap-2.5 flex-1 pr-2">
+          <View className="size-9 rounded-2xl bg-amber-200/80 items-center justify-center">
+            <AlertTriangle size={20} color="#B45309" strokeWidth={2.4} />
+          </View>
+          <View className="flex-1">
+            <Text className="text-base font-bold text-amber-950">
+              Cảnh báo thuốc kỵ nhau ({warnings.length})
+            </Text>
+            <Text className="text-xs font-semibold text-amber-800">
+              {isExpanded ? 'Chạm để thu gọn cảnh báo' : 'Chạm mũi tên để xem chi tiết dược lý'}
+            </Text>
+          </View>
+        </View>
+
+        <View className="size-9 rounded-full bg-white/90 border border-amber-200 items-center justify-center">
+          {isExpanded ? (
+            <ChevronUp size={20} color="#B45309" strokeWidth={2.5} />
+          ) : (
+            <ChevronDown size={20} color="#B45309" strokeWidth={2.5} />
+          )}
+        </View>
+      </Pressable>
+
+      {/* Expanded Content with BIG, READABLE text */}
+      {isExpanded && (
+        <View className="mt-3.5 pt-3 border-t border-amber-200/80 gap-3">
+          {warnings.map((warn, wIdx) => (
+            <View
+              key={warn.id || wIdx}
+              className="p-4 bg-white rounded-2xl border border-amber-200 shadow-2xs"
+            >
+              <View className="flex-row items-center justify-between mb-2 flex-wrap gap-1">
+                <Text className="text-base sm:text-lg font-extrabold text-amber-950 flex-1 pr-2">
+                  {warn.medicineA} ⚡ {warn.medicineB}
+                </Text>
+                <Badge
+                  label={
+                    warn.severity === 'critical'
+                      ? 'Rất nguy hiểm'
+                      : warn.severity === 'high'
+                      ? 'Nghiêm trọng'
+                      : 'Cần lưu ý'
+                  }
+                  variant={
+                    warn.severity === 'critical' || warn.severity === 'high'
+                      ? 'danger'
+                      : 'warning'
+                  }
+                />
+              </View>
+
+              {/* Big readable typography */}
+              <Text className="text-sm sm:text-base font-medium text-zinc-800 leading-relaxed mb-2.5">
+                {warn.description}
+              </Text>
+
+              {warn.clinicalRecommendation ? (
+                <View className="p-3 rounded-xl bg-amber-50 border border-amber-200/80">
+                  <Text className="text-xs sm:text-sm font-bold text-amber-900 leading-relaxed">
+                    💡 Khuyến nghị bác sĩ: {warn.clinicalRecommendation}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ))}
+        </View>
+      )}
+    </Card>
+  );
+}
 
 export default function PrescriptionScanScreen() {
   const router = useRouter();
@@ -89,6 +198,7 @@ export default function PrescriptionScanScreen() {
 
   // Manual entry modal
   const [isManualModalVisible, setIsManualModalVisible] = useState(false);
+  const [showExtraInfo, setShowExtraInfo] = useState(false);
   const [manualForm, setManualForm] = useState<{
     name: string;
     activeIngredient: string;
@@ -100,6 +210,7 @@ export default function PrescriptionScanScreen() {
     category: string;
     mealTiming: MealTiming;
     timeSlots: TimeSlot[];
+    treatmentCourse: string;
   }>({
     name: '',
     activeIngredient: '',
@@ -111,7 +222,13 @@ export default function PrescriptionScanScreen() {
     category: 'Khác',
     mealTiming: 'after_meal',
     timeSlots: ['morning'],
+    treatmentCourse: '',
   });
+
+  // Cabinet selection sheet state when saving to cabinet
+  const [isCabinetSelectModalVisible, setIsCabinetSelectModalVisible] = useState(false);
+  const [selectedCabinetTarget, setSelectedCabinetTarget] = useState<string>('shared');
+  const [sharedExpiryInput, setSharedExpiryInput] = useState<string>('2027-12-31');
 
   // Laser scanning animation controller
   const laserAnim = useRef(new Animated.Value(0)).current;
@@ -381,17 +498,49 @@ export default function PrescriptionScanScreen() {
   const handleAddToCabinet = () => {
     if (!analysisResult) return;
     try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {}
+
+    // Set default expiry if missing
+    let defaultExpiry = '2027-12-31';
+    if (analysisResult.scanType === 'single_medicine' && analysisResult.singleMedicine?.expiryDate) {
+      defaultExpiry = analysisResult.singleMedicine.expiryDate;
+    } else if (analysisResult.scanType === 'prescription') {
+      const firstValid = analysisResult.medicines.find((m) => m.expiryDate)?.expiryDate;
+      if (firstValid) defaultExpiry = firstValid;
+    }
+    setSharedExpiryInput(defaultExpiry);
+    setIsCabinetSelectModalVisible(true);
+  };
+
+  const handleConfirmAddToCabinet = () => {
+    if (!analysisResult) return;
+    try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {}
 
+    const targetOwner = selectedCabinetTarget;
+    const targetExpiry = targetOwner === 'shared' ? sharedExpiryInput.trim() || '2027-12-31' : undefined;
+
     if (analysisResult.scanType === 'prescription') {
-      const medsToAdd = analysisResult.medicines.filter((m) => selectedMedIds.includes(m.id));
-      addMedicines(medsToAdd, true, false);
+      const medsToAdd = analysisResult.medicines
+        .filter((m) => selectedMedIds.includes(m.id))
+        .map((m) => ({
+          ...m,
+          ownerId: targetOwner,
+          expiryDate: targetExpiry || m.expiryDate || '2027-12-31',
+        }));
+      addMedicines(medsToAdd, true, false, targetOwner === 'shared' ? undefined : targetOwner);
     } else if (analysisResult.scanType === 'single_medicine' && analysisResult.singleMedicine) {
-      const med = analysisResult.singleMedicine;
-      addSingleMedicine(med, undefined, true, false);
+      const med: Medicine = {
+        ...analysisResult.singleMedicine,
+        ownerId: targetOwner,
+        expiryDate: targetExpiry || analysisResult.singleMedicine.expiryDate || '2027-12-31',
+      };
+      addSingleMedicine(med, undefined, true, false, targetOwner === 'shared' ? undefined : targetOwner);
     }
 
+    setIsCabinetSelectModalVisible(false);
     router.replace('/(tabs)/cabinet');
   };
 
@@ -428,6 +577,8 @@ export default function PrescriptionScanScreen() {
       expiryDate: manualForm.expiryDate.trim() || '2027-12-31',
       category: manualForm.category.trim() || 'Khác',
       mealTiming: manualForm.mealTiming,
+      treatmentCourse: manualForm.treatmentCourse.trim() || undefined,
+      ownerId: activeMemberId,
     };
 
     addSingleMedicine(newMed, manualForm.timeSlots, true, true, activeMemberId);
@@ -451,6 +602,7 @@ export default function PrescriptionScanScreen() {
         <ScreenHeader
           title="Quét đơn thuốc và tra cứu thuốc"
           subtitle="Chụp ảnh đơn thuốc bệnh viện hoặc vỏ hộp thuốc"
+          showAvatar={false}
         />
 
         {/* ========================================================= */}
@@ -478,38 +630,44 @@ export default function PrescriptionScanScreen() {
               </View>
             </View>
 
-            {/* Direct Action Buttons (Zero demo chips) */}
-            <View className="w-full gap-2.5 px-1 mt-1">
-              <Button
-                title="Mở Camera Chụp Ảnh"
-                variant="primary"
+            {/* CONTROL DECK KHÔI PHỤC THEO ẢNH 2: Nút xanh to trên cùng, 2 nút xám dưới */}
+            <View className="w-full gap-2.5 mt-2">
+              {/* Nút lớn trên cùng: Mở Camera Chụp Ảnh */}
+              <Pressable
                 onPress={handleCameraCapture}
-                icon={<CameraIcon size={20} color="#FFFFFF" />}
-              />
+                accessibilityLabel="Mở Camera Chụp Ảnh"
+                className="w-full bg-blue-600 active:bg-blue-700 py-4 px-4 rounded-2xl flex-row items-center justify-center gap-2.5 shadow-md shadow-blue-500/20 active:scale-[0.98]"
+              >
+                <CameraIcon size={22} color="#FFFFFF" strokeWidth={2.2} />
+                <Text className="text-white text-base font-bold">Mở Camera Chụp Ảnh</Text>
+              </Pressable>
 
-              <View className="flex-row gap-2.5">
-                <View className="flex-1">
-                  <Button
-                    title="Chọn Từ Thư Viện"
-                    variant="secondary"
-                    onPress={handleLibraryPicker}
-                    icon={<ImageIcon size={18} color="#18181B" />}
-                  />
-                </View>
-                <View className="flex-1">
-                  <Button
-                    title="Tự Nhập Tay"
-                    variant="secondary"
-                    onPress={() => setIsManualModalVisible(true)}
-                    icon={<Plus size={18} color="#18181B" />}
-                  />
-                </View>
+              {/* Hàng 2 nút cạnh nhau: Chọn Từ Thư Viện & Tự Nhập Tay */}
+              <View className="flex-row gap-2.5 w-full">
+                <Pressable
+                  onPress={handleLibraryPicker}
+                  accessibilityLabel="Chọn Từ Thư Viện"
+                  className="flex-1 bg-slate-200/90 active:bg-slate-300 py-3.5 px-3 rounded-2xl flex-row items-center justify-center gap-2 active:scale-[0.98]"
+                >
+                  <ImageIcon size={19} color="#0F172A" strokeWidth={2.2} />
+                  <Text className="text-zinc-900 text-sm font-bold">Chọn Từ Thư Viện</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setIsManualModalVisible(true)}
+                  accessibilityLabel="Tự Nhập Tay"
+                  className="flex-1 bg-slate-200/90 active:bg-slate-300 py-3.5 px-3 rounded-2xl flex-row items-center justify-center gap-2 active:scale-[0.98]"
+                >
+                  <Plus size={19} color="#0F172A" strokeWidth={2.4} />
+                  <Text className="text-zinc-900 text-sm font-bold">Tự Nhập Tay</Text>
+                </Pressable>
               </View>
-            </View>
 
-            <Text className="text-xs text-zinc-400 font-medium text-center px-4 mt-1">
-              Chụp ảnh rõ nét đơn thuốc hoặc bao bì để AI tự động nhận diện và cảnh báo tương tác thuốc.
-            </Text>
+              {/* Dòng chữ hướng dẫn chuẩn Ảnh 2 */}
+              <Text className="text-xs text-zinc-400 font-medium text-center px-4 leading-relaxed mt-1">
+                Chụp ảnh rõ nét đơn thuốc hoặc bao bì để AI tự động nhận diện và cảnh báo tương tác thuốc.
+              </Text>
+            </View>
           </View>
         )}
 
@@ -611,6 +769,24 @@ export default function PrescriptionScanScreen() {
             {/* ------------------------------------------------------- */}
             {analysisResult.scanType === 'prescription' && (
               <View className="gap-4">
+                {/* Cảnh báo vàng nếu đơn thuốc viết tay nguệch ngoạc khó đọc */}
+                {(analysisResult.isHandwritten || analysisResult.handwritingWarning) && (
+                  <View className="p-4 rounded-3xl bg-amber-50 border border-amber-300 shadow-sm flex-row items-start gap-3">
+                    <View className="size-8 rounded-xl bg-amber-200/80 items-center justify-center shrink-0 mt-0.5">
+                      <AlertTriangle size={18} color="#D97706" />
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-sm font-bold text-amber-950">
+                        Cảnh Báo Đơn Thuốc Viết Tay
+                      </Text>
+                      <Text className="text-xs text-amber-800 leading-relaxed mt-1 font-medium">
+                        {analysisResult.handwritingWarning ||
+                          'Đơn thuốc viết bằng tay chữ có thể nguệch ngoạc khó đọc, tên thuốc hoặc liều lượng có thể sai lệch và không thể quét chính xác 100%. Vui lòng kiểm tra kỹ hoặc bấm "Chi tiết / Sửa" để chủ động sửa lại tên thuốc.'}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
                 {/* Header card with Doctor & Diagnosis info */}
                 <Card className="p-4 bg-white">
                   <View className="flex-row items-center justify-between mb-3">
@@ -618,18 +794,25 @@ export default function PrescriptionScanScreen() {
                       <CheckCircle2 size={18} color="#059669" />
                       <Text className="text-base font-bold text-zinc-900">Đơn thuốc đã nhận diện</Text>
                     </View>
-                    <Pressable
-                      onPress={handleResetScan}
-                      className="flex-row items-center gap-1 active:opacity-70 px-2 py-1"
-                    >
-                      <RotateCcw size={13} color="#64748B" />
-                      <Text className="text-xs font-semibold text-slate-500">Quét lại</Text>
-                    </Pressable>
+                    {analysisResult.isHandwritten && (
+                      <Badge label="Đơn viết tay" variant="warning" />
+                    )}
                   </View>
 
                   <View className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
                     <Text className="text-sm font-bold text-zinc-900">
-                      {analysisResult.doctorName || 'Đơn thuốc khám bệnh'}
+                      Bác sĩ: {
+                        analysisResult.doctorName &&
+                        analysisResult.doctorName.trim() !== '' &&
+                        analysisResult.doctorName !== 'Không có' &&
+                        !analysisResult.doctorName.toLowerCase().includes('bác sĩ khám bệnh') &&
+                        !analysisResult.doctorName.toLowerCase().includes('bác sĩ phụ trách') &&
+                        !analysisResult.doctorName.toLowerCase().includes('không rõ')
+                          ? (analysisResult.doctorName.startsWith('BS') || analysisResult.doctorName.startsWith('Bác sĩ')
+                              ? analysisResult.doctorName.replace(/^(Bác sĩ:?\s*)/i, '')
+                              : analysisResult.doctorName)
+                          : 'Không có'
+                      }
                     </Text>
                     <Text className="text-xs text-slate-500 mt-0.5">
                       Chẩn đoán: {analysisResult.diagnosis || 'Theo dõi điều trị y khoa'}
@@ -659,53 +842,8 @@ export default function PrescriptionScanScreen() {
                   </View>
                 </Card>
 
-                {/* Drug Interaction Warning Box */}
-                {analysisResult.warnings && analysisResult.warnings.length > 0 && (
-                  <Card className="p-4 bg-amber-50/80 border border-amber-200">
-                    <View className="flex-row items-center gap-2 mb-2">
-                      <AlertTriangle size={18} color="#D97706" />
-                      <Text className="text-sm font-bold text-amber-900">
-                        Cảnh Báo Tương Tác Dược Lý ({analysisResult.warnings.length})
-                      </Text>
-                    </View>
-                    <View className="gap-2">
-                      {analysisResult.warnings.map((warn, wIdx) => (
-                        <View
-                          key={warn.id || wIdx}
-                          className="p-3 bg-white/90 rounded-2xl border border-amber-100"
-                        >
-                          <View className="flex-row items-center justify-between mb-1">
-                            <Text className="text-xs font-bold text-amber-900 flex-1 pr-2">
-                              {warn.medicineA} ⚡ {warn.medicineB}
-                            </Text>
-                            <Badge
-                              label={
-                                warn.severity === 'critical'
-                                  ? 'Nguy hiểm'
-                                  : warn.severity === 'high'
-                                  ? 'Nghiêm trọng'
-                                  : 'Cần lưu ý'
-                              }
-                              variant={
-                                warn.severity === 'critical' || warn.severity === 'high'
-                                  ? 'danger'
-                                  : 'warning'
-                              }
-                            />
-                          </View>
-                          <Text className="text-xs text-amber-800 leading-relaxed mb-1">
-                            {warn.description}
-                          </Text>
-                          {warn.clinicalRecommendation ? (
-                            <Text className="text-2xs font-semibold text-amber-700">
-                              💡 Khuyến nghị: {warn.clinicalRecommendation}
-                            </Text>
-                          ) : null}
-                        </View>
-                      ))}
-                    </View>
-                  </Card>
-                )}
+                {/* Drug Interaction Warning Box (Collapsible, Big Typography, Auto-hide when safe) */}
+                <DrugInteractionWarningSection warnings={analysisResult.warnings} />
 
                 {/* Prescription Medicines List with iOS Circle Checkmarks */}
                 <Card className="p-4 bg-white">
@@ -788,6 +926,16 @@ export default function PrescriptionScanScreen() {
                     />
                   </View>
                 </View>
+
+                {/* Nút Hoàn thành lần quét ngang ở dưới cùng */}
+                <View className="pt-1">
+                  <Button
+                    title="Hoàn thành lần quét"
+                    variant="secondary"
+                    onPress={handleResetScan}
+                    icon={<CheckCircle2 size={18} color="#2563EB" />}
+                  />
+                </View>
               </View>
             )}
 
@@ -802,13 +950,6 @@ export default function PrescriptionScanScreen() {
                       <CheckCircle2 size={18} color="#059669" />
                       <Text className="text-base font-bold text-zinc-900">Thông tin thuốc đã bóc tách</Text>
                     </View>
-                    <Pressable
-                      onPress={handleResetScan}
-                      className="flex-row items-center gap-1 active:opacity-70 px-2 py-1"
-                    >
-                      <RotateCcw size={13} color="#64748B" />
-                      <Text className="text-xs font-semibold text-slate-500">Quét lại</Text>
-                    </Pressable>
                   </View>
 
                   {/* Product Hero Header */}
@@ -848,53 +989,8 @@ export default function PrescriptionScanScreen() {
                   </View>
                 </Card>
 
-                {/* Drug Interaction Warning Box */}
-                {analysisResult.warnings && analysisResult.warnings.length > 0 && (
-                  <Card className="p-4 bg-amber-50/80 border border-amber-200">
-                    <View className="flex-row items-center gap-2 mb-2">
-                      <AlertTriangle size={18} color="#D97706" />
-                      <Text className="text-sm font-bold text-amber-900">
-                        Cảnh Báo Tương Tác Dược Lý ({analysisResult.warnings.length})
-                      </Text>
-                    </View>
-                    <View className="gap-2">
-                      {analysisResult.warnings.map((warn, wIdx) => (
-                        <View
-                          key={warn.id || wIdx}
-                          className="p-3 bg-white/90 rounded-2xl border border-amber-100"
-                        >
-                          <View className="flex-row items-center justify-between mb-1">
-                            <Text className="text-xs font-bold text-amber-900 flex-1 pr-2">
-                              {warn.medicineA} ⚡ {warn.medicineB}
-                            </Text>
-                            <Badge
-                              label={
-                                warn.severity === 'critical'
-                                  ? 'Nguy hiểm'
-                                  : warn.severity === 'high'
-                                  ? 'Nghiêm trọng'
-                                  : 'Cần lưu ý'
-                              }
-                              variant={
-                                warn.severity === 'critical' || warn.severity === 'high'
-                                  ? 'danger'
-                                  : 'warning'
-                              }
-                            />
-                          </View>
-                          <Text className="text-xs text-amber-800 leading-relaxed mb-1">
-                            {warn.description}
-                          </Text>
-                          {warn.clinicalRecommendation ? (
-                            <Text className="text-2xs font-semibold text-amber-700">
-                              💡 Khuyến nghị: {warn.clinicalRecommendation}
-                            </Text>
-                          ) : null}
-                        </View>
-                      ))}
-                    </View>
-                  </Card>
-                )}
+                {/* Drug Interaction Warning Box (Collapsible, Big Typography, Auto-hide when safe) */}
+                <DrugInteractionWarningSection warnings={analysisResult.warnings} />
 
                 {/* Bottom Action Buttons: [Thêm vào Lịch] & [Lưu vào Tủ] */}
                 <View className="flex-row gap-3">
@@ -914,6 +1010,16 @@ export default function PrescriptionScanScreen() {
                       icon={<Pill size={18} color="#18181B" />}
                     />
                   </View>
+                </View>
+
+                {/* Nút Hoàn thành lần quét ngang ở dưới cùng */}
+                <View className="pt-1">
+                  <Button
+                    title="Hoàn thành lần quét"
+                    variant="secondary"
+                    onPress={handleResetScan}
+                    icon={<CheckCircle2 size={18} color="#2563EB" />}
+                  />
                 </View>
               </View>
             )}
@@ -1081,8 +1187,8 @@ export default function PrescriptionScanScreen() {
               <ScrollView
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingBottom: 24 }}
-                className="gap-3"
+                contentContainerStyle={{ paddingBottom: 32, paddingTop: 6 }}
+                className="gap-4.5"
               >
                 <Input
                   label="Tên biệt dược *"
@@ -1103,6 +1209,179 @@ export default function PrescriptionScanScreen() {
                   onChangeText={(val) => setManualForm((prev) => ({ ...prev, dosage: val }))}
                 />
 
+                {/* Nhóm phân loại thuốc nhập tay (Không dùng AI) */}
+                <View className="gap-2 mt-2 mb-1">
+                  <Text className="text-xs font-bold uppercase tracking-wider text-zinc-600 px-1">
+                    Phân loại nhóm thuốc (Người dùng tự chọn):
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    className="flex-row gap-2 py-1"
+                  >
+                    {MANUAL_CATEGORIES.map((cat) => {
+                      const isSel = manualForm.category === cat;
+                      return (
+                        <Pressable
+                          key={cat}
+                          onPress={() => {
+                            try {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            } catch {}
+                            setManualForm((p) => ({ ...p, category: cat }));
+                          }}
+                          className={`px-4 py-2 rounded-full border transition-all ${
+                            isSel
+                              ? 'bg-zinc-900 border-zinc-900 shadow-2xs'
+                              : 'bg-slate-100 border-slate-200'
+                          }`}
+                        >
+                          <Text
+                            className={`text-xs ${
+                              isSel ? 'text-white font-bold' : 'text-zinc-700 font-medium'
+                            }`}
+                          >
+                            {cat}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
+                {/* Nút bấm Thêm thông tin */}
+                <Pressable
+                  onPress={() => {
+                    try {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    } catch {}
+                    setShowExtraInfo(!showExtraInfo);
+                  }}
+                  className="flex-row items-center justify-between p-3.5 rounded-2xl bg-blue-50/80 border border-blue-200 active:bg-blue-100 my-1"
+                >
+                  <View className="flex-row items-center gap-2">
+                    <Plus size={16} color="#2563EB" />
+                    <Text className="text-xs font-bold text-blue-700">
+                      {showExtraInfo
+                        ? 'Thu gọn thông tin bổ sung'
+                        : 'Thêm lựa chọn thông tin (Tác dụng, HSD, Số viên...)'}
+                    </Text>
+                  </View>
+                  <ChevronDown
+                    size={16}
+                    color="#2563EB"
+                    style={{ transform: [{ rotate: showExtraInfo ? '180deg' : '0deg' }] }}
+                  />
+                </Pressable>
+
+                {/* Khối Thông tin bổ sung */}
+                {showExtraInfo && (
+                  <View className="gap-3.5 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 mt-1">
+                    <Input
+                      label="Tác dụng của thuốc (Ngắn gọn)"
+                      placeholder="VD: Giảm đau, hạ sốt nhanh, giảm sưng..."
+                      value={manualForm.purpose}
+                      onChangeText={(val) => setManualForm((prev) => ({ ...prev, purpose: val }))}
+                    />
+
+                    <Input
+                      label="Đợt thuốc / Liệu trình uống (Theo dõi định kỳ)"
+                      placeholder="VD: Đợt 7 ngày, Liệu trình 1 tháng, Tái khám 15/12..."
+                      value={manualForm.treatmentCourse}
+                      onChangeText={(val) => setManualForm((prev) => ({ ...prev, treatmentCourse: val }))}
+                    />
+
+                    <View className="flex-row gap-2.5">
+                      <View className="flex-1">
+                        <Input
+                          label="Số viên thuốc"
+                          placeholder="VD: 20"
+                          keyboardType="numeric"
+                          value={manualForm.remainingCount}
+                          onChangeText={(val) => setManualForm((prev) => ({ ...prev, remainingCount: val }))}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <Input
+                          label="Hạn sử dụng"
+                          placeholder="VD: 2027-12-31"
+                          value={manualForm.expiryDate}
+                          onChangeText={(val) => setManualForm((prev) => ({ ...prev, expiryDate: val }))}
+                        />
+                      </View>
+                    </View>
+
+                    <Input
+                      label="Hướng dẫn sử dụng thêm"
+                      placeholder="VD: Uống sau ăn no với nhiều nước..."
+                      value={manualForm.instructions}
+                      onChangeText={(val) => setManualForm((prev) => ({ ...prev, instructions: val }))}
+                    />
+
+                    {/* Chỉ dẫn bữa ăn */}
+                    <View className="gap-1.5">
+                      <Text className="text-xs font-semibold text-zinc-700">Chỉ dẫn dùng theo bữa ăn:</Text>
+                      <View className="flex-row gap-2">
+                        {[
+                          { key: 'before_meal', label: 'Trước ăn' },
+                          { key: 'after_meal', label: 'Sau ăn no' },
+                          { key: 'with_meal', label: 'Trong ăn' },
+                        ].map((m) => {
+                          const isSel = manualForm.mealTiming === m.key;
+                          return (
+                            <Pressable
+                              key={m.key}
+                              onPress={() => setManualForm((p) => ({ ...p, mealTiming: m.key as MealTiming }))}
+                              className={`flex-1 py-2 items-center rounded-xl border ${
+                                isSel ? 'bg-blue-600 border-blue-600' : 'bg-white border-slate-200'
+                              }`}
+                            >
+                              <Text className={`text-xs ${isSel ? 'text-white font-bold' : 'text-zinc-700 font-medium'}`}>
+                                {m.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    {/* Cữ uống trong ngày */}
+                    <View className="gap-1.5">
+                      <Text className="text-xs font-semibold text-zinc-700">Cữ uống trong ngày:</Text>
+                      <View className="flex-row gap-2">
+                        {[
+                          { key: 'morning', label: 'Sáng' },
+                          { key: 'noon', label: 'Trưa' },
+                          { key: 'evening', label: 'Tối' },
+                        ].map((slot) => {
+                          const isSel = manualForm.timeSlots.includes(slot.key as TimeSlot);
+                          return (
+                            <Pressable
+                              key={slot.key}
+                              onPress={() => {
+                                setManualForm((p) => {
+                                  const exists = p.timeSlots.includes(slot.key as TimeSlot);
+                                  const updated = exists
+                                    ? p.timeSlots.filter((s) => s !== slot.key)
+                                    : [...p.timeSlots, slot.key as TimeSlot];
+                                  return { ...p, timeSlots: updated.length ? updated : ['morning'] };
+                                });
+                              }}
+                              className={`flex-1 py-2 items-center rounded-xl border ${
+                                isSel ? 'bg-zinc-900 border-zinc-900' : 'bg-white border-slate-200'
+                              }`}
+                            >
+                              <Text className={`text-xs ${isSel ? 'text-white font-bold' : 'text-zinc-700 font-medium'}`}>
+                                {slot.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  </View>
+                )}
+
                 <View className="pt-2">
                   <Button title="Lưu Vào Tủ & Lịch" variant="primary" onPress={handleSaveManual} />
                 </View>
@@ -1112,8 +1391,148 @@ export default function PrescriptionScanScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ========================================================= */}
+      {/* MODAL: CHỌN TỦ ĐỂ LƯU THUỐC                              */}
+      {/* ========================================================= */}
+      <Modal
+        visible={isCabinetSelectModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIsCabinetSelectModalVisible(false)}
+      >
+        <Pressable
+          className="flex-1 bg-black/40 justify-end"
+          onPress={() => setIsCabinetSelectModalVisible(false)}
+        >
+          <Pressable
+            className="bg-white rounded-t-3xl p-5 border-t border-slate-200"
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View className="w-12 h-1.5 rounded-full bg-slate-300 self-center mb-3" />
+            <Text className="text-base font-bold text-zinc-900 mb-1">
+              Chọn Tủ Để Lưu Thuốc
+            </Text>
+            <Text className="text-xs text-zinc-500 mb-3">
+              Lựa chọn lưu vào Tủ dự phòng chung hoặc tủ riêng của thành viên:
+            </Text>
+
+            <View className="gap-2 mb-3">
+              {/* Option 1: Tủ dự phòng chung */}
+              <Pressable
+                onPress={() => {
+                  try {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  } catch {}
+                  setSelectedCabinetTarget('shared');
+                }}
+                className={`flex-row items-center justify-between p-3.5 rounded-2xl border ${
+                  selectedCabinetTarget === 'shared'
+                    ? 'bg-blue-50/70 border-blue-500'
+                    : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <View className="flex-row items-center gap-3">
+                  <View className="size-9 rounded-xl bg-blue-100 items-center justify-center">
+                    <Package size={18} color="#2563EB" />
+                  </View>
+                  <View>
+                    <Text className="text-sm font-bold text-zinc-900">Tủ dự phòng chung</Text>
+                    <Text className="text-2xs text-zinc-500">Dùng chung cho cả gia đình</Text>
+                  </View>
+                </View>
+                {selectedCabinetTarget === 'shared' && <Check size={18} color="#2563EB" strokeWidth={3} />}
+              </Pressable>
+
+              {/* Individual family member cabinets */}
+              {familyMembers.map((member) => {
+                const isSelected = selectedCabinetTarget === member.id;
+                return (
+                  <Pressable
+                    key={member.id}
+                    onPress={() => {
+                      try {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      } catch {}
+                      setSelectedCabinetTarget(member.id);
+                    }}
+                    className={`flex-row items-center justify-between p-3.5 rounded-2xl border ${
+                      isSelected
+                        ? 'bg-blue-50/70 border-blue-500'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <View className="flex-row items-center gap-3">
+                      <View
+                        className="size-9 rounded-xl items-center justify-center"
+                        style={{ backgroundColor: member.avatarColor || '#2563EB' }}
+                      >
+                        <Text className="text-xs font-bold text-white">
+                          {member.name.charAt(0)}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text className="text-sm font-bold text-zinc-900">Tủ của {member.name}</Text>
+                        <Text className="text-2xs text-zinc-500">{member.relation}</Text>
+                      </View>
+                    </View>
+                    {isSelected && <Check size={18} color="#2563EB" strokeWidth={3} />}
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Cảnh báo & Tự nhập HSD nếu chọn Tủ chung */}
+            {selectedCabinetTarget === 'shared' && (
+              <View className="mb-3.5 p-3.5 rounded-2xl bg-amber-50 border border-amber-200">
+                <View className="flex-row items-center gap-1.5 mb-1.5">
+                  <AlertTriangle size={15} color="#D97706" />
+                  <Text className="text-xs font-bold text-amber-900">
+                    Cảnh Báo Hạn Dùng Tủ Chung
+                  </Text>
+                </View>
+                <Text className="text-xs text-amber-800 leading-relaxed mb-2">
+                  Thuốc lưu trữ trong Tủ dự phòng chung bắt buộc phải rõ hạn sử dụng để tránh nguy cơ uống nhầm thuốc quá hạn. Vui lòng xác nhận hoặc tự nhập HSD:
+                </Text>
+                <Input
+                  label="Hạn sử dụng cho thuốc trong tủ chung"
+                  placeholder="YYYY-MM-DD (VD: 2027-12-31)"
+                  value={sharedExpiryInput}
+                  onChangeText={setSharedExpiryInput}
+                />
+              </View>
+            )}
+
+            <Button
+              title={`Lưu Vào ${
+                selectedCabinetTarget === 'shared'
+                  ? 'Tủ Dự Phòng Chung'
+                  : `Tủ Của ${familyMembers.find((m) => m.id === selectedCabinetTarget)?.name || 'Thành Viên'}`
+              }`}
+              variant="primary"
+              onPress={handleConfirmAddToCabinet}
+              icon={<CheckCircle2 size={18} color="#FFFFFF" />}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Medicine Detail Modal bottom sheet */}
-      <MedicineDetailModal />
+      <MedicineDetailModal
+        onUpdate={(updatedMed) => {
+          if (analysisResult) {
+            setAnalysisResult({
+              ...analysisResult,
+              medicines: analysisResult.medicines.map((m) =>
+                m.id === updatedMed.id ? { ...m, ...updatedMed } : m
+              ),
+              singleMedicine:
+                analysisResult.singleMedicine && analysisResult.singleMedicine.id === updatedMed.id
+                  ? { ...analysisResult.singleMedicine, ...updatedMed }
+                  : analysisResult.singleMedicine,
+            });
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }

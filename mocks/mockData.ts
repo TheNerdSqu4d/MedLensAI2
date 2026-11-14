@@ -44,6 +44,8 @@ export const MED_AMLODIPINE: Medicine = {
   remainingCount: 28,
   expiryDate: '2026-12-31',
   category: 'Blood Pressure',
+  ownerId: 'bo',
+  treatmentCourse: 'Định kỳ hàng ngày (Tim mạch)',
 };
 
 export const MED_METFORMIN: Medicine = {
@@ -57,6 +59,8 @@ export const MED_METFORMIN: Medicine = {
   remainingCount: 56,
   expiryDate: '2027-06-30',
   category: 'Diabetes',
+  ownerId: 'tam',
+  treatmentCourse: 'Liệu trình 3 tháng tái khám',
 };
 
 export const MED_ATORVASTATIN: Medicine = {
@@ -70,6 +74,8 @@ export const MED_ATORVASTATIN: Medicine = {
   remainingCount: 30,
   expiryDate: '2026-10-15',
   category: 'Tim mạch & Mỡ máu',
+  ownerId: 'me',
+  treatmentCourse: 'Định kỳ buổi tối',
 };
 
 export const MED_ASPIRIN: Medicine = {
@@ -83,6 +89,8 @@ export const MED_ASPIRIN: Medicine = {
   remainingCount: 45,
   expiryDate: '2026-12-31',
   category: 'Tim mạch & Chống đông',
+  ownerId: 'me',
+  treatmentCourse: 'Phòng ngừa huyết khối',
 };
 
 export const MED_LOSARTAN: Medicine = {
@@ -96,6 +104,8 @@ export const MED_LOSARTAN: Medicine = {
   remainingCount: 30,
   expiryDate: '2027-08-15',
   category: 'Blood Pressure',
+  ownerId: 'bo',
+  treatmentCourse: 'Định kỳ huyết áp',
 };
 
 export const MED_ENALAPRIL: Medicine = {
@@ -109,6 +119,8 @@ export const MED_ENALAPRIL: Medicine = {
   remainingCount: 20,
   expiryDate: '2027-10-20',
   category: 'Blood Pressure',
+  ownerId: 'bo',
+  treatmentCourse: 'Định kỳ huyết áp',
 };
 
 export const MED_OMEPRAZOLE: Medicine = {
@@ -122,6 +134,8 @@ export const MED_OMEPRAZOLE: Medicine = {
   remainingCount: 14,
   expiryDate: '2026-08-20',
   category: 'Stomach',
+  ownerId: 'tam',
+  treatmentCourse: 'Đợt 14 ngày dạ dày',
 };
 
 export const MED_PARACETAMOL: Medicine = {
@@ -135,6 +149,8 @@ export const MED_PARACETAMOL: Medicine = {
   remainingCount: 20,
   expiryDate: '2027-12-31',
   category: 'Pain Relief',
+  ownerId: 'shared',
+  treatmentCourse: 'Dự phòng gia đình khi sốt',
 };
 
 export const MED_AUGMENTIN: Medicine = {
@@ -148,6 +164,8 @@ export const MED_AUGMENTIN: Medicine = {
   remainingCount: 14,
   expiryDate: '2026-05-15',
   category: 'Antibiotics',
+  ownerId: 'tam',
+  treatmentCourse: 'Đợt 7 ngày kháng sinh',
 };
 
 // Initial Dose Slots (Today Schedule)
@@ -308,7 +326,7 @@ export const MOCK_ANALYSIS_UNRECOGNIZED: PrescriptionAnalysisResult = {
   medicines: [],
   warnings: [],
   errorMessage:
-    'Hình ảnh quá mờ hoặc không phát hiện đơn thuốc/bao bì thuốc hợp lệ. Hãy chụp lại ảnh rõ nét hơn hoặc bấm Tự nhập thuốc bằng tay.',
+    'Không nhận diện được đơn thuốc / bao bì thuốc do hình ảnh không đọc rõ chữ. Vui lòng chụp lại rõ nét hơn hoặc tự nhập tay.',
 };
 
 // Family Members & Multi-Profile Support
@@ -319,6 +337,11 @@ export const MOCK_FAMILY_MEMBERS: FamilyMember[] = [
     relation: 'Tôi',
     avatarColor: '#2563EB',
     role: 'caregiver',
+    mealTimes: {
+      breakfast: '07:30',
+      lunch: '12:30',
+      dinner: '20:00',
+    },
     healthProfile: {
       bloodType: 'O+',
       dobYear: 1991,
@@ -342,6 +365,11 @@ export const MOCK_FAMILY_MEMBERS: FamilyMember[] = [
     relation: 'Bố - 65 tuổi',
     avatarColor: '#D97706',
     role: 'patient',
+    mealTimes: {
+      breakfast: '06:30',
+      lunch: '11:30',
+      dinner: '18:30',
+    },
     healthProfile: {
       bloodType: 'A+',
       dobYear: 1961,
@@ -365,6 +393,11 @@ export const MOCK_FAMILY_MEMBERS: FamilyMember[] = [
     relation: 'Mẹ - 62 tuổi',
     avatarColor: '#7C3AED',
     role: 'patient',
+    mealTimes: {
+      breakfast: '07:00',
+      lunch: '12:00',
+      dinner: '19:00',
+    },
     healthProfile: {
       bloodType: 'B+',
       dobYear: 1964,
@@ -393,4 +426,99 @@ export const MOCK_WEEKLY_MATRIX = [
   { dayLabel: 'T6', dateLabel: '13', morning: null, noon: null, evening: null },
   { dayLabel: 'T7', dateLabel: '14', morning: null, noon: null, evening: null },
   { dayLabel: 'CN', dateLabel: '15', morning: null, noon: null, evening: null },
+];
+
+export interface WeekData {
+  id: string;
+  label: string;
+  dateRange: string;
+  matrix: Array<{
+    dayLabel: string;
+    dateLabel: string;
+    morning: boolean | null;
+    noon: boolean | null;
+    evening: boolean | null;
+    isToday?: boolean;
+    missedDetails?: Array<{ slotTitle: string; time: string; medicineName: string }>;
+  }>;
+}
+
+export const MOCK_ALL_WEEKS: WeekData[] = [
+  {
+    id: 'week_1',
+    label: 'Tuần 1',
+    dateRange: '02/11 - 08/11/2026',
+    matrix: [
+      { dayLabel: 'T2', dateLabel: '02', morning: true, noon: true, evening: true },
+      { dayLabel: 'T3', dateLabel: '03', morning: true, noon: true, evening: true },
+      {
+        dayLabel: 'T4',
+        dateLabel: '04',
+        morning: true,
+        noon: false,
+        evening: true,
+        missedDetails: [{ slotTitle: 'Buổi Trưa', time: '12:30', medicineName: 'Metformin 500mg (1 viên)' }],
+      },
+      { dayLabel: 'T5', dateLabel: '05', morning: true, noon: true, evening: true },
+      { dayLabel: 'T6', dateLabel: '06', morning: true, noon: true, evening: true },
+      {
+        dayLabel: 'T7',
+        dateLabel: '07',
+        morning: false,
+        noon: true,
+        evening: true,
+        missedDetails: [{ slotTitle: 'Buổi Sáng', time: '07:30', medicineName: 'Amlodipine 5mg (1 viên)' }],
+      },
+      { dayLabel: 'CN', dateLabel: '08', morning: true, noon: true, evening: true },
+    ],
+  },
+  {
+    id: 'week_2',
+    label: 'Tuần 2',
+    dateRange: '09/11 - 15/11/2026',
+    matrix: [
+      { dayLabel: 'T2', dateLabel: '09', morning: true, noon: true, evening: true },
+      { dayLabel: 'T3', dateLabel: '10', morning: true, noon: true, evening: true },
+      {
+        dayLabel: 'T4',
+        dateLabel: '11',
+        morning: true,
+        noon: false,
+        evening: true,
+        missedDetails: [{ slotTitle: 'Buổi Trưa', time: '12:30', medicineName: 'Metformin 500mg (1 viên)' }],
+      },
+      { dayLabel: 'T5', dateLabel: '12', morning: true, noon: true, evening: null, isToday: true },
+      { dayLabel: 'T6', dateLabel: '13', morning: null, noon: null, evening: null },
+      { dayLabel: 'T7', dateLabel: '14', morning: null, noon: null, evening: null },
+      { dayLabel: 'CN', dateLabel: '15', morning: null, noon: null, evening: null },
+    ],
+  },
+  {
+    id: 'week_3',
+    label: 'Tuần 3',
+    dateRange: '16/11 - 22/11/2026',
+    matrix: [
+      { dayLabel: 'T2', dateLabel: '16', morning: null, noon: null, evening: null },
+      { dayLabel: 'T3', dateLabel: '17', morning: null, noon: null, evening: null },
+      { dayLabel: 'T4', dateLabel: '18', morning: null, noon: null, evening: null },
+      { dayLabel: 'T5', dateLabel: '19', morning: null, noon: null, evening: null },
+      { dayLabel: 'T6', dateLabel: '20', morning: null, noon: null, evening: null },
+      { dayLabel: 'T7', dateLabel: '21', morning: null, noon: null, evening: null },
+      { dayLabel: 'CN', dateLabel: '22', morning: null, noon: null, evening: null },
+    ],
+  },
+  {
+    id: 'week_4',
+    label: 'Tuần 4',
+    dateRange: '23/11 - 29/11/2026',
+    matrix: [
+      { dayLabel: 'T2', dateLabel: '23', morning: null, noon: null, evening: null },
+      { dayLabel: 'T3', dateLabel: '24', morning: null, noon: null, evening: null },
+      { dayLabel: 'T4', dateLabel: '25', morning: null, noon: null, evening: null },
+      { dayLabel: 'T5', dateLabel: '26', morning: null, noon: null, evening: null },
+      { dayLabel: 'T6', dateLabel: '27', morning: null, noon: null, evening: null },
+      { dayLabel: 'T7', dateLabel: '28', morning: null, noon: null, evening: null },
+      { dayLabel: 'CN', dateLabel: '29', morning: null, noon: null, evening: null },
+    ],
+  },
 ];

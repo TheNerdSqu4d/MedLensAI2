@@ -9,6 +9,7 @@ import type {
   PrescriptionAnalysisResult,
   HealthProfile,
   MealTimes,
+  FamilyMember,
 } from '@/types/medlens';
 import { MOCK_SCHEDULE, MOCK_CABINET, MOCK_FAMILY_MEMBERS } from '@/mocks/mockData';
 import { rescheduleAllNotifications } from '@/services/notifications';
@@ -104,14 +105,16 @@ export const useMedStore = create<MedState>()(
         });
       },
 
-      addFamilyMember: (name: string, relation: string, healthProfile?: HealthProfile) => {
+      addFamilyMember: (name: string, relation: string, healthProfile?: HealthProfile, mealTimes?: MealTimes) => {
         const id = `member-${Date.now()}`;
-        const newMember = {
+        const newMealTimes = mealTimes || { breakfast: '07:30', lunch: '12:30', dinner: '20:00' };
+        const newMember: FamilyMember = {
           id,
           name,
           relation,
           avatarColor: '#059669',
           role: 'patient' as const,
+          mealTimes: newMealTimes,
           healthProfile: healthProfile || {
             bloodType: 'Chưa rõ',
             dobYear: 1995,
@@ -132,7 +135,17 @@ export const useMedStore = create<MedState>()(
           familyMembers: [...familyMembers, newMember],
           memberSchedules: {
             ...(memberSchedules || {}),
-            [id]: MOCK_SCHEDULE.map((s) => ({ ...s, medicines: [], isTaken: false })),
+            [id]: MOCK_SCHEDULE.map((s) => ({
+              ...s,
+              timeLabel:
+                s.slot === 'morning'
+                  ? newMealTimes.breakfast || '07:30'
+                  : s.slot === 'noon'
+                  ? newMealTimes.lunch || '12:30'
+                  : newMealTimes.dinner || '20:00',
+              medicines: [],
+              isTaken: false,
+            })),
           },
         });
       },
@@ -166,17 +179,111 @@ export const useMedStore = create<MedState>()(
 
       toggleMedicineTaken: (slot: TimeSlot, medicineId: string) => {
         set((state) => {
+          let wasTaken = false;
+          let medName = '';
+
           const newSchedule = state.schedule.map((doseSlot) => {
             if (doseSlot.slot !== slot) return doseSlot;
-            const updatedMeds = doseSlot.medicines.map((m) =>
-              m.id === medicineId ? { ...m, isTaken: !m.isTaken } : m
-            );
+            const updatedMeds = doseSlot.medicines.map((m) => {
+              if (m.id === medicineId) {
+                wasTaken = !m.isTaken;
+                medName = m.name;
+                return {
+                  ...m,
+                  isTaken: wasTaken,
+                  isSkipped: false,
+                  snoozedUntil: undefined,
+                };
+              }
+              return m;
+            });
             const allTaken = updatedMeds.length > 0 && updatedMeds.every((m) => m.isTaken);
             return {
               ...doseSlot,
               medicines: updatedMeds,
               isTaken: allTaken,
               takenAt: allTaken ? doseSlot.takenAt || new Date().toISOString() : undefined,
+            };
+          });
+
+          // Logic tính lượng thuốc còn lại trong tủ: khi uống -> trừ 1 viên; khi hủy -> cộng lại 1 viên
+          const newCabinet = state.cabinet.map((cabMed) => {
+            const isMatch =
+              cabMed.id === medicineId ||
+              (medName && cabMed.name.trim().toLowerCase() === medName.trim().toLowerCase());
+            if (isMatch) {
+              const currentCount = cabMed.remainingCount ?? 20;
+              const nextCount = wasTaken ? Math.max(0, currentCount - 1) : currentCount + 1;
+              return { ...cabMed, remainingCount: nextCount };
+            }
+            return cabMed;
+          });
+
+          return {
+            schedule: newSchedule,
+            cabinet: newCabinet,
+            memberSchedules: {
+              ...(state.memberSchedules || {}),
+              [state.activeMemberId]: newSchedule,
+            },
+          };
+        });
+      },
+
+      snoozeMedicine: (slot: TimeSlot, medicineId: string, minutes: number = 10) => {
+        const snoozeDate = new Date(Date.now() + minutes * 60 * 1000);
+        const hours = String(snoozeDate.getHours()).padStart(2, '0');
+        const mins = String(snoozeDate.getMinutes()).padStart(2, '0');
+        const snoozedTimeStr = `${hours}:${mins}`;
+
+        set((state) => {
+          const newSchedule = state.schedule.map((doseSlot) => {
+            if (doseSlot.slot !== slot) return doseSlot;
+            const updatedMeds = doseSlot.medicines.map((m) =>
+              m.id === medicineId
+                ? {
+                    ...m,
+                    isTaken: false,
+                    isSkipped: false,
+                    snoozedUntil: snoozedTimeStr,
+                  }
+                : m
+            );
+            return {
+              ...doseSlot,
+              medicines: updatedMeds,
+              isTaken: false,
+              takenAt: undefined,
+            };
+          });
+
+          return {
+            schedule: newSchedule,
+            memberSchedules: {
+              ...(state.memberSchedules || {}),
+              [state.activeMemberId]: newSchedule,
+            },
+          };
+        });
+      },
+
+      skipMedicine: (slot: TimeSlot, medicineId: string) => {
+        set((state) => {
+          const newSchedule = state.schedule.map((doseSlot) => {
+            if (doseSlot.slot !== slot) return doseSlot;
+            const updatedMeds = doseSlot.medicines.map((m) =>
+              m.id === medicineId
+                ? {
+                    ...m,
+                    isTaken: false,
+                    isSkipped: true,
+                    snoozedUntil: undefined,
+                  }
+                : m
+            );
+            return {
+              ...doseSlot,
+              medicines: updatedMeds,
             };
           });
 
@@ -216,7 +323,10 @@ export const useMedStore = create<MedState>()(
               if (!alreadyExists) {
                 // Strip timeSlots property to keep pure Medicine
                 const { timeSlots: _, ...cleanMedicine } = analyzedMed;
-                medicinesToAdd.push(cleanMedicine);
+                medicinesToAdd.push({
+                  ...cleanMedicine,
+                  isTaken: doseSlot.isTaken,
+                });
               }
             }
           }
@@ -429,19 +539,60 @@ export const useMedStore = create<MedState>()(
           }
         }
 
+        const updatedSelectedMedicine =
+          get().selectedMedicine?.id === targetId
+            ? { ...get().selectedMedicine!, ...patch }
+            : get().selectedMedicine;
+
         set({
           cabinet: updatedCabinet,
           schedule: updatedSchedule,
           memberSchedules: updatedMemberSchedules,
+          selectedMedicine: updatedSelectedMedicine,
         });
       },
 
       removeMedicineFromCabinet: (medicineId: string) => {
-        set((state) => ({
-          cabinet: state.cabinet.filter((m) => m.id !== medicineId),
-          selectedMedicine:
-            state.selectedMedicine?.id === medicineId ? null : state.selectedMedicine,
-        }));
+        set((state) => {
+          const targetMed = state.cabinet.find((m) => m.id === medicineId);
+          const targetName = targetMed?.name.trim().toLowerCase();
+
+          // 1. Xóa khỏi tủ thuốc
+          const newCabinet = state.cabinet.filter((m) => m.id !== medicineId);
+
+          // 2. Xóa khỏi lịch uống đang hiển thị
+          const newSchedule = state.schedule.map((slot) => ({
+            ...slot,
+            medicines: slot.medicines.filter(
+              (m) =>
+                m.id !== medicineId &&
+                (!targetName || m.name.trim().toLowerCase() !== targetName)
+            ),
+          }));
+
+          // 3. Xóa khỏi tất cả lịch uống của các thành viên gia đình
+          const newMemberSchedules: Record<string, DoseSlot[]> = {};
+          if (state.memberSchedules) {
+            for (const [memId, slots] of Object.entries(state.memberSchedules)) {
+              newMemberSchedules[memId] = slots.map((slot) => ({
+                ...slot,
+                medicines: slot.medicines.filter(
+                  (m) =>
+                    m.id !== medicineId &&
+                    (!targetName || m.name.trim().toLowerCase() !== targetName)
+                ),
+              }));
+            }
+          }
+
+          return {
+            cabinet: newCabinet,
+            schedule: newSchedule,
+            memberSchedules: newMemberSchedules,
+            selectedMedicine:
+              state.selectedMedicine?.id === medicineId ? null : state.selectedMedicine,
+          };
+        });
       },
 
       updateHealthProfile: (memberId: string, profile: Partial<HealthProfile>) => {
@@ -492,6 +643,47 @@ export const useMedStore = create<MedState>()(
             m.id === medicineId ? { ...m, remainingCount: Math.max(0, count) } : m
           ),
         }));
+      },
+
+      updateMemberMealTimes: (memberId: string, times: Partial<MealTimes>) => {
+        set((state) => {
+          const updatedMembers = state.familyMembers.map((m) => {
+            if (m.id !== memberId) return m;
+            const currentTimes = m.mealTimes || DEFAULT_MEAL_TIMES;
+            return {
+              ...m,
+              mealTimes: { ...currentTimes, ...times },
+            };
+          });
+
+          const targetTimes =
+            updatedMembers.find((m) => m.id === memberId)?.mealTimes || DEFAULT_MEAL_TIMES;
+
+          const updateSlots = (slots: DoseSlot[]) =>
+            slots.map((s) => {
+              if (s.slot === 'morning' && targetTimes.breakfast)
+                return { ...s, timeLabel: targetTimes.breakfast };
+              if (s.slot === 'noon' && targetTimes.lunch)
+                return { ...s, timeLabel: targetTimes.lunch };
+              if (s.slot === 'evening' && targetTimes.dinner)
+                return { ...s, timeLabel: targetTimes.dinner };
+              return s;
+            });
+
+          const memberSchedules = { ...(state.memberSchedules || {}) };
+          if (memberSchedules[memberId]) {
+            memberSchedules[memberId] = updateSlots(memberSchedules[memberId]);
+          }
+
+          const nextSchedule =
+            state.activeMemberId === memberId ? updateSlots(state.schedule) : state.schedule;
+
+          return {
+            familyMembers: updatedMembers,
+            memberSchedules,
+            schedule: nextSchedule,
+          };
+        });
       },
     }),
     {

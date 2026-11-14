@@ -34,6 +34,7 @@ const testSuiteFiles = [
   './tiers/tier1-features/cabinet_filters.test.ts',
   './tiers/tier1-features/reset_demo.test.ts',
   './tiers/tier1-features/meal_times_and_notifications.test.ts',
+  './tiers/tier1-features/weekly_and_cabinet_features.test.ts',
 
   // Tier 2: Boundary & Corner Cases (35 tests across 7 domains)
   './tiers/tier2-boundaries/empty_cabinet.test.ts',

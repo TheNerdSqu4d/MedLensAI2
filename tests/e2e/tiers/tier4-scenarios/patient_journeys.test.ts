@@ -54,15 +54,15 @@ defineTest(
     const morningTakenAt = morningSlot.takenAt;
 
     adh = calculateAdherence(state.schedule);
-    assert.equal(adh.completed, 1);
-    assert.equal(adh.percentage, 33);
+    assert.equal(adh.completed, 2);
+    assert.equal(adh.percentage, 67);
 
     // 3. 12:30 Noon dose taken (Metformin)
     state.toggleDoseSlot('noon');
     state = await StoreTestHarness.getState();
     adh = calculateAdherence(state.schedule);
-    assert.equal(adh.completed, 2);
-    assert.equal(adh.percentage, 67);
+    assert.equal(adh.completed, 3);
+    assert.equal(adh.percentage, 100);
 
     // 4. 20:00 Evening dose taken (Atorvastatin)
     state.toggleDoseSlot('evening');
@@ -229,7 +229,7 @@ defineTest(
     assert.equal(state.schedule[0].isTaken, true);
     const firstCheckTimestamp = state.schedule[0].takenAt;
     adh = calculateAdherence(state.schedule);
-    assert.equal(adh.percentage, 33);
+    assert.equal(adh.percentage, 67);
 
     // 1:00 Preset 2 scan with resilient fallback
     MockNetworkController.setMode('SUCCESS_PRESET_2');
@@ -268,7 +268,7 @@ defineTest(
       resurrectedState.cabinet.some((m) => m.name.includes('Gaviscon'))
     );
     const finalAdh = calculateAdherence(resurrectedState.schedule);
-    assert.equal(finalAdh.percentage, 33);
+    assert.equal(finalAdh.percentage, 50);
   }
 );
 

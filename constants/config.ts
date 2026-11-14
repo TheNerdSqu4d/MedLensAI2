@@ -3,8 +3,8 @@
  * Khi bạn tạo project trên supabase.com, chỉ cần dán URL và Anon Key vào đây.
  */
 export const SUPABASE_CONFIG = {
-  url: process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://pvswmyrwmcqaslearnhd.supabase.co',
-  anonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_fV6UcFuhSYi0tdtCViPwug_P_QPuBIE',
+  url: process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://vlaqqwizwcbigyfvbmff.supabase.co',
+  anonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_foB0bAWjJw3v3bStAfVkJg_bV6TH7Mw',
 };
 
 export const APP_CONFIG = {

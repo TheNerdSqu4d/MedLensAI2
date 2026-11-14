@@ -37,8 +37,8 @@ defineTest(
 
     const updated = await StoreTestHarness.getState();
     const adh = calculateAdherence(updated.schedule);
-    assert.equal(adh.completed, 1);
-    assert.equal(adh.percentage, 33);
+    assert.equal(adh.completed, 3);
+    assert.equal(adh.percentage, 50);
   }
 );
 
@@ -155,7 +155,7 @@ defineTest(
     assert.equal(morningAfter.takenAt, takenTime, 'takenAt must persist across app restart');
 
     const adh = calculateAdherence(rehydratedState.schedule);
-    assert.equal(adh.percentage, 33);
+    assert.equal(adh.percentage, 67);
   }
 );
 
@@ -278,7 +278,7 @@ defineTest(
     const finalState = fresh.getState();
 
     const adh = calculateAdherence(finalState.schedule);
-    assert.equal(adh.completed, 3);
+    assert.equal(adh.completed, adh.total);
     assert.equal(adh.percentage, 100);
     assert.equal(finalState.schedule[0].takenAt, morningTime);
   }

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, Pressable, Animated, PanResponder, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Animated, PanResponder, Alert, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -19,6 +19,9 @@ import {
   Sparkles,
   Package,
   Trash2,
+  Search,
+  X,
+  Users,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { Card, Badge, BadgeVariant } from '@/components/ui';
@@ -81,51 +84,25 @@ function SwipeableMedicineCard({
   const expiry = checkExpiryStatus(med.expiryDate);
   const stock = getStockStatus(med.remainingCount);
 
-  let containerModifier = 'border-slate-200/60 opacity-100';
+  let containerModifier = 'border-slate-200/60 bg-white';
   if (expiry.isExpired) {
-    containerModifier = 'border-red-300 opacity-80 bg-red-50/20';
+    containerModifier = 'border-red-300 bg-red-50/30';
   } else if (expiry.isExpiringSoon) {
-    containerModifier = 'border-amber-300 opacity-95 bg-amber-50/10';
+    containerModifier = 'border-amber-300 bg-amber-50/20';
   }
 
-  const promptConfirmDelete = () => {
+  // Xóa trực tiếp ngay khi vuốt hoặc bấm Xóa (Không hiện popup confirm)
+  const executeDirectDelete = () => {
     try {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {}
-
-    Alert.alert(
-      'Xác Nhận Xóa Thuốc',
-      `Bạn có chắc chắn muốn xóa thuốc "${med.name}" khỏi Tủ Thuốc Gia Đình không?\n\nThao tác này không thể hoàn tác.`,
-      [
-        {
-          text: 'Hủy',
-          style: 'cancel',
-          onPress: () => {
-            Animated.spring(translateX, {
-              toValue: 0,
-              useNativeDriver: true,
-              bounciness: 4,
-              speed: 14,
-            }).start(() => {
-              isOpen.current = false;
-            });
-          },
-        },
-        {
-          text: 'Xóa thuốc',
-          style: 'destructive',
-          onPress: () => {
-            Animated.timing(translateX, {
-              toValue: -500,
-              duration: 220,
-              useNativeDriver: true,
-            }).start(() => {
-              onDelete(med);
-            });
-          },
-        },
-      ]
-    );
+    Animated.timing(translateX, {
+      toValue: -500,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      onDelete(med);
+    });
   };
 
   const panResponder = useRef(
@@ -159,9 +136,9 @@ function SwipeableMedicineCard({
           isDragging.current = false;
         }, 80);
 
-        // 1. Full swipe dứt khoát sang trái (kéo dài > 160px hoặc vuốt nhanh vx < -0.7)
-        if (gestureState.dx < -160 || (gestureState.dx < -80 && gestureState.vx < -0.7)) {
-          promptConfirmDelete();
+        // 1. Full swipe dứt khoát sang trái (kéo dài > 130px hoặc vuốt nhanh vx < -0.6) -> Xóa luôn!
+        if (gestureState.dx < -130 || (gestureState.dx < -60 && gestureState.vx < -0.6)) {
+          executeDirectDelete();
           return;
         }
 
@@ -201,18 +178,28 @@ function SwipeableMedicineCard({
     })
   ).current;
 
+  // Dải đỏ liền mạch chỉ hiện khi bắt đầu vuốt (ở trạng thái 0 ẩn hoàn toàn 100%)
+  const deleteZoneOpacity = translateX.interpolate({
+    inputRange: [-8, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
   return (
     <View className="mb-3 overflow-hidden rounded-3xl relative bg-transparent">
-      {/* Background Revealed Action: Red Delete Zone (85px wide) */}
-      <View className="absolute inset-y-0 right-0 w-[85px] bg-red-600 rounded-r-3xl flex-row items-center justify-center overflow-hidden">
+      {/* Background Revealed Action: Dải đỏ toàn phần liền mạch phủ kín theo đà kéo */}
+      <Animated.View
+        style={{ opacity: deleteZoneOpacity }}
+        className="absolute inset-0 bg-red-600 rounded-3xl flex-row justify-end items-center overflow-hidden"
+      >
         <Pressable
-          onPress={promptConfirmDelete}
-          className="w-full h-full items-center justify-center active:bg-red-700"
+          onPress={executeDirectDelete}
+          className="w-[90px] h-full items-center justify-center active:bg-red-700"
         >
-          <Trash2 size={20} color="#FFFFFF" strokeWidth={2.2} />
-          <Text className="text-3xs font-bold text-white mt-1">Xóa</Text>
+          <Trash2 size={22} color="#FFFFFF" strokeWidth={2.2} />
+          <Text className="text-xs font-bold text-white mt-1">Xóa</Text>
         </Pressable>
-      </View>
+      </Animated.View>
 
       {/* Foreground Interactive Card with PanResponder */}
       <Animated.View
@@ -267,53 +254,76 @@ function SwipeableMedicineCard({
               </View>
 
               <Text
-                className="text-xs text-zinc-400 font-medium mb-1.5"
+                className="text-xs text-zinc-400 font-medium mb-1"
                 numberOfLines={1}
               >
                 Hoạt chất: {med.activeIngredient}
               </Text>
 
-              {/* Stock & Expiry Row */}
-              <View className="flex-row items-center gap-2">
-                <Badge
-                  label={
+              {/* Tác dụng ngắn gọn của thuốc */}
+              <Text
+                className="text-xs text-zinc-600 font-medium mb-2"
+                numberOfLines={1}
+              >
+                Tác dụng: {med.purpose || 'Hỗ trợ điều trị y khoa'}
+              </Text>
+
+              {/* Stock & Expiry dạng Pill */}
+              <View className="flex-row items-center gap-2 flex-wrap">
+                <View
+                  className={`px-3 py-1 rounded-full border ${
                     stock.isOut
-                      ? 'Hết thuốc'
-                      : `Còn ${med.remainingCount} viên`
-                  }
-                  variant={
-                    stock.isOut
-                      ? 'danger'
+                      ? 'bg-red-50 border-red-200'
                       : stock.variant === 'warning'
-                      ? 'warning'
-                      : 'default'
-                  }
-                />
-                <Badge
-                  label={
+                      ? 'bg-amber-50 border-amber-200'
+                      : 'bg-slate-100 border-slate-200'
+                  }`}
+                >
+                  <Text
+                    className={`text-xs font-semibold ${
+                      stock.isOut
+                        ? 'text-red-700'
+                        : stock.variant === 'warning'
+                        ? 'text-amber-800'
+                        : 'text-zinc-700'
+                    }`}
+                  >
+                    {stock.isOut ? 'Hết thuốc' : `Còn ${med.remainingCount} viên`}
+                  </Text>
+                </View>
+
+                <View
+                  className={`px-3 py-1 rounded-full border flex-row items-center gap-1 ${
                     expiry.isExpired
-                      ? `HSD: ${med.expiryDate || 'Chưa rõ'} • Đã hết hạn`
+                      ? 'bg-red-50 border-red-200'
                       : expiry.isExpiringSoon
-                      ? `HSD: ${med.expiryDate} • Sắp hết hạn`
+                      ? 'bg-amber-50 border-amber-200'
+                      : 'bg-slate-100 border-slate-200'
+                  }`}
+                >
+                  {expiry.isExpired ? (
+                    <AlertTriangle size={11} color="#DC2626" />
+                  ) : (
+                    <Calendar size={11} color="#64748B" />
+                  )}
+                  <Text
+                    className={`text-xs font-semibold ${
+                      expiry.isExpired
+                        ? 'text-red-700 font-bold'
+                        : expiry.isExpiringSoon
+                        ? 'text-amber-800'
+                        : 'text-zinc-700'
+                    }`}
+                  >
+                    {expiry.isExpired
+                      ? `HSD: ${med.expiryDate || 'N/A'} (Hết hạn)`
+                      : expiry.isExpiringSoon
+                      ? `HSD: ${med.expiryDate} (Sắp hết)`
                       : med.expiryDate
                       ? `HSD: ${med.expiryDate}`
-                      : 'Chưa rõ HSD'
-                  }
-                  variant={
-                    expiry.isExpired
-                      ? 'danger'
-                      : expiry.isExpiringSoon
-                      ? 'warning'
-                      : 'default'
-                  }
-                  icon={
-                    expiry.isExpired ? (
-                      <AlertTriangle size={11} color="#DC2626" />
-                    ) : (
-                      <Calendar size={11} color="#64748B" />
-                    )
-                  }
-                />
+                      : 'Chưa rõ HSD'}
+                  </Text>
+                </View>
               </View>
             </View>
 
@@ -328,20 +338,47 @@ function SwipeableMedicineCard({
 export default function MedicineCabinetScreen() {
   const router = useRouter();
   const cabinet = useMedStore((state) => state.cabinet);
+  const familyMembers = useMedStore((state) => state.familyMembers) || [];
   const setSelectedMedicine = useMedStore((state) => state.setSelectedMedicine);
   const removeMedicineFromCabinet = useMedStore((state) => state.removeMedicineFromCabinet);
 
-  const [selectedCategory, setSelectedCategory] = useState<CabinetCategory>('Tất cả');
+  const [selectedOwnerFilter, setSelectedOwnerFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [lastDeletedMed, setLastDeletedMed] = useState<Medicine | null>(null);
+
+  const memberFilters = useMemo(() => [
+    { id: 'all', label: 'Tất cả' },
+    { id: 'shared', label: 'Tủ dự phòng chung' },
+    ...familyMembers.map((m) => ({ id: m.id, label: m.name })),
+  ], [familyMembers]);
 
   const filteredMedicines = useMemo(() => {
-    return filterCabinetByCategory(cabinet, selectedCategory);
-  }, [cabinet, selectedCategory]);
+    let list = cabinet;
+    if (selectedOwnerFilter !== 'all') {
+      list = list.filter((m) => {
+        if (selectedOwnerFilter === 'shared') {
+          return m.ownerId === 'shared' || !m.ownerId;
+        }
+        return m.ownerId === selectedOwnerFilter;
+      });
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) ||
+          (m.activeIngredient && m.activeIngredient.toLowerCase().includes(q)) ||
+          (m.purpose && m.purpose.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [cabinet, selectedOwnerFilter, searchQuery]);
 
-  const handleSelectCategory = (cat: CabinetCategory) => {
+  const handleSelectOwnerFilter = (filterId: string) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch {}
-    setSelectedCategory(cat);
+    setSelectedOwnerFilter(filterId);
   };
 
   const handleSelectMedicine = (med: Medicine) => {
@@ -352,10 +389,24 @@ export default function MedicineCabinetScreen() {
   };
 
   const handleDeleteMedicine = (med: Medicine) => {
+    setLastDeletedMed(med);
     removeMedicineFromCabinet(med.id);
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {}
+    // Tự động tắt thông báo sau 5 giây
+    setTimeout(() => {
+      setLastDeletedMed((prev) => (prev?.id === med.id ? null : prev));
+    }, 5000);
+  };
+
+  const handleUndoDelete = () => {
+    if (!lastDeletedMed) return;
+    try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+    useMedStore.getState().addSingleMedicine(lastDeletedMed, undefined, true, false, lastDeletedMed.ownerId);
+    setLastDeletedMed(null);
   };
 
   const handleOpenSettings = () => {
@@ -392,7 +443,7 @@ export default function MedicineCabinetScreen() {
       <StatusBar style="dark" />
 
       {/* Screen Header */}
-      <View className="px-4 pt-2 pb-3 flex-row items-center justify-between">
+      <View className="px-4 pt-2 pb-2.5 flex-row items-center justify-between">
         <View className="flex-1 pr-3">
           <Text className="text-3xl font-bold tracking-tight text-zinc-900">
             Tủ Thuốc
@@ -413,34 +464,58 @@ export default function MedicineCabinetScreen() {
         </Pressable>
       </View>
 
-      {/* Pill Filter Category Row */}
-      <View className="py-2.5">
+      {/* Search Bar */}
+      <View className="px-4 pb-2">
+        <View className="flex-row items-center bg-white px-3.5 py-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
+          <Search size={18} color="#94A3B8" />
+          <TextInput
+            placeholder="Tìm theo tên thuốc hoặc hoạt chất..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholderTextColor="#94A3B8"
+            className="flex-1 ml-2 text-sm text-zinc-900 font-medium py-0"
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')} hitSlop={8} className="p-1">
+              <X size={16} color="#94A3B8" />
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      {/* Pill Filter Row: Theo người trong gia đình */}
+      <View className="py-2">
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 16 }}
           className="flex-row gap-2"
         >
-          {CABINET_CATEGORIES.map((category) => {
-            const isSelected = selectedCategory === category;
-            const iconColor = isSelected ? '#FFFFFF' : '#475569';
+          {memberFilters.map((filter) => {
+            const isSelected = selectedOwnerFilter === filter.id;
             return (
               <Pressable
-                key={category}
-                onPress={() => handleSelectCategory(category)}
+                key={filter.id}
+                onPress={() => handleSelectOwnerFilter(filter.id)}
                 className={`flex-row items-center gap-1.5 px-3.5 py-2 rounded-full border transition-all active:scale-95 ${
                   isSelected
                     ? 'bg-zinc-900 border-zinc-900 shadow-2xs'
                     : 'bg-white border-slate-200/80 shadow-2xs'
                 }`}
               >
-                {getCategoryIcon(category, iconColor)}
+                {filter.id === 'all' ? (
+                  <Layers size={14} color={isSelected ? '#FFFFFF' : '#475569'} />
+                ) : filter.id === 'shared' ? (
+                  <Package size={14} color={isSelected ? '#FFFFFF' : '#475569'} />
+                ) : (
+                  <User size={14} color={isSelected ? '#FFFFFF' : '#475569'} />
+                )}
                 <Text
                   className={`text-xs ${
                     isSelected ? 'font-bold text-white' : 'font-medium text-slate-700'
                   }`}
                 >
-                  {category}
+                  {filter.label}
                 </Text>
               </Pressable>
             );
@@ -460,12 +535,12 @@ export default function MedicineCabinetScreen() {
               <PackageOpen size={28} color="#94A3B8" />
             </View>
             <Text className="text-base font-bold text-zinc-800 text-center">
-              {cabinet.length === 0 ? 'Tủ thuốc đang trống' : 'Không có thuốc trong nhóm này'}
+              {cabinet.length === 0 ? 'Tủ thuốc đang trống' : 'Không tìm thấy thuốc phù hợp'}
             </Text>
             <Text className="text-xs text-zinc-500 text-center mt-1">
               {cabinet.length === 0
                 ? 'Hãy quét toa thuốc hoặc nạp đơn mẫu từ Tab Quét Toa để thêm thuốc vào tủ.'
-                : 'Thử chọn nhóm bệnh khác hoặc chọn "Tất cả" để xem danh sách.'}
+                : 'Thử tìm với từ khóa khác hoặc chọn "Tất cả" thành viên để xem danh sách.'}
             </Text>
           </Card>
         ) : (
@@ -473,6 +548,9 @@ export default function MedicineCabinetScreen() {
             <View className="flex-row items-center justify-between px-1 mb-2">
               <Text className="text-3xs text-slate-400 font-medium">
                 💡 Vuốt sang trái để xóa thuốc khỏi tủ
+              </Text>
+              <Text className="text-3xs text-zinc-500 font-semibold">
+                Hiển thị {filteredMedicines.length} loại
               </Text>
             </View>
             {filteredMedicines.map((med) => (
@@ -488,6 +566,21 @@ export default function MedicineCabinetScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Toast thông báo Hoàn tác khi xóa thuốc khỏi tủ */}
+      {lastDeletedMed && (
+        <View className="absolute bottom-6 left-4 right-4 bg-zinc-900 py-3.5 px-4 rounded-2xl flex-row items-center justify-between shadow-2xl z-40 border border-white/10">
+          <Text className="text-white text-xs sm:text-sm font-semibold flex-1 pr-2" numberOfLines={1}>
+            Đã xóa "{lastDeletedMed.name}" khỏi tủ thuốc
+          </Text>
+          <Pressable
+            onPress={handleUndoDelete}
+            className="bg-blue-600 px-3.5 py-1.5 rounded-xl active:bg-blue-700"
+          >
+            <Text className="text-white text-xs font-bold">Hoàn tác</Text>
+          </Pressable>
+        </View>
+      )}
 
       {/* Medicine Detail Modal */}
       <MedicineDetailModal />

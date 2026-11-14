@@ -20,38 +20,60 @@ export interface AdherenceResult {
 
 /**
  * Tính toán tiến độ tuân thủ uống thuốc trong ngày (Adherence Card - Tab 1)
- * Hỗ trợ tính điểm lũy tiến (partial credit) khi uống từng liều thuốc trong cữ
+ * Tính tổng theo số thuốc đang hiển thị trên màn hình (loại thuốc),
+ * loại trừ thuốc quá hạn sử dụng hoặc thuốc đã bấm bỏ qua.
+ * Hỗ trợ các trường hợp cữ không có thuốc (không bị chia sai theo 3 buổi).
  */
 export function calculateAdherence(
-  schedule: Array<{ isTaken?: boolean; medicines?: Array<{ isTaken?: boolean }> }>
+  schedule: Array<{
+    isTaken?: boolean;
+    medicines?: Array<{
+      id?: string;
+      name?: string;
+      isTaken?: boolean;
+      isSkipped?: boolean;
+      expiryDate?: string | null;
+    }>;
+  }>
 ): AdherenceResult {
-  const total = schedule.length;
-  if (total === 0) {
-    return {
-      total: 0,
-      completed: 0,
-      percentage: 0,
-      badgeLabel: 'Cần uống thêm',
-      badgeVariant: 'primary',
-      label: 'Đã uống 0/0 cữ thuốc hôm nay',
-    };
-  }
+  // Tập hợp tất cả các loại thuốc đang thực sự hiển thị trên màn hình
+  // (loại trừ thuốc quá hạn HSD và thuốc đã bấm Bỏ qua)
+  const visibleMeds: Array<{ isTaken?: boolean }> = [];
+  let hasMedicineField = false;
 
-  let partialScore = 0;
-  for (const s of schedule) {
-    if (s.isTaken) {
-      partialScore += 1;
-    } else if (s.medicines && s.medicines.length > 0) {
-      const takenCount = s.medicines.filter((m) => Boolean(m.isTaken)).length;
-      partialScore += takenCount / s.medicines.length;
+  for (const slot of schedule) {
+    if (slot.medicines && Array.isArray(slot.medicines)) {
+      hasMedicineField = true;
+      for (const m of slot.medicines) {
+        const isExpired = m.expiryDate ? checkExpiryStatus(m.expiryDate).isExpired : false;
+        if (!isExpired && !m.isSkipped) {
+          visibleMeds.push(m);
+        }
+      }
     }
   }
 
-  const completed = schedule.filter((s) => Boolean(s.isTaken)).length;
-  const percentage = Math.min(100, Math.round((partialScore / total) * 100));
-  const badgeLabel = percentage === 100 ? 'Tuyệt vời' : 'Cần uống thêm';
-  const badgeVariant = percentage === 100 ? 'success' : 'primary';
-  const label = `Đã uống ${completed}/${total} cữ thuốc hôm nay`;
+  // Fallback nếu danh sách chỉ gồm các slot đơn giản không có mảng medicines
+  if (!hasMedicineField) {
+    const total = schedule.length;
+    const completed = schedule.filter((s) => Boolean(s.isTaken)).length;
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return {
+      total,
+      completed,
+      percentage,
+      badgeLabel: percentage === 100 && total > 0 ? 'Tuyệt vời' : 'Cần uống thêm',
+      badgeVariant: percentage === 100 && total > 0 ? 'success' : 'primary',
+      label: `Đã uống ${completed}/${total} loại thuốc hôm nay`,
+    };
+  }
+
+  const total = visibleMeds.length;
+  const completed = visibleMeds.filter((m) => Boolean(m.isTaken)).length;
+  const percentage = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+  const badgeLabel = percentage === 100 && total > 0 ? 'Tuyệt vời' : 'Cần uống thêm';
+  const badgeVariant = percentage === 100 && total > 0 ? 'success' : 'primary';
+  const label = `Đã uống ${completed}/${total} loại thuốc hôm nay`;
 
   return { total, completed, percentage, badgeLabel, badgeVariant, label };
 }
@@ -220,8 +242,25 @@ export function evaluatePrescriptionConflicts(
 ): InteractionWarning[] {
   const warnings: InteractionWarning[] = [];
 
-  const hasCipro = prescriptionMeds.some((m) => m.name.toLowerCase().includes('ciprofloxacin'));
-  const hasGaviscon = prescriptionMeds.some((m) => m.name.toLowerCase().includes('gaviscon'));
+  const hasMed = (meds: Medicine[], keyword: string) =>
+    meds.some(
+      (m) =>
+        m.name.toLowerCase().includes(keyword.toLowerCase()) ||
+        (m.activeIngredient && m.activeIngredient.toLowerCase().includes(keyword.toLowerCase()))
+    );
+
+  const getMedName = (meds: Medicine[], keyword: string, fallback: string) => {
+    const found = meds.find(
+      (m) =>
+        m.name.toLowerCase().includes(keyword.toLowerCase()) ||
+        (m.activeIngredient && m.activeIngredient.toLowerCase().includes(keyword.toLowerCase()))
+    );
+    return found ? found.name : fallback;
+  };
+
+  // 1. Ciprofloxacin + Gaviscon (Internal Prescription)
+  const hasCipro = hasMed(prescriptionMeds, 'ciprofloxacin');
+  const hasGaviscon = hasMed(prescriptionMeds, 'gaviscon');
 
   if (hasCipro && hasGaviscon) {
     warnings.push({
@@ -230,12 +269,13 @@ export function evaluatePrescriptionConflicts(
       medicineA: 'Ciprofloxacin 500mg',
       medicineB: 'Gaviscon Dual Action 10ml',
       severity: 'high',
-      description: 'Tương tác ion kim loại chelate làm giảm hấp thu kháng sinh.',
+      description: 'Tương tác ion kim loại chelate làm giảm hấp thu kháng sinh Ciprofloxacin.',
       clinicalRecommendation: 'Uống Ciprofloxacin trước 2 giờ hoặc sau 4 giờ dùng Gaviscon.',
     });
   }
 
-  const hasAspirinInCabinet = cabinetMeds.some((m) => m.name.toLowerCase().includes('aspirin'));
+  // 2. Gaviscon + Aspirin (Cabinet Cross Conflict)
+  const hasAspirinInCabinet = hasMed(cabinetMeds, 'aspirin');
   if (hasGaviscon && hasAspirinInCabinet) {
     warnings.push({
       id: 'warn-gaviscon-aspirin',
@@ -243,9 +283,97 @@ export function evaluatePrescriptionConflicts(
       medicineA: 'Gaviscon Dual Action 10ml',
       medicineB: 'Aspirin 81mg',
       severity: 'moderate',
-      description: 'Chất kháng acid làm tan sớm màng bao Aspirin tại dạ dày.',
+      description: 'Chất kháng acid làm tan sớm màng bao Aspirin tại dạ dày gây kích ứng.',
       clinicalRecommendation: 'Uống cách nhau tối thiểu 2 giờ.',
     });
+  }
+
+  // 3. Aspirin + Ibuprofen / NSAIDs (Internal or Cabinet Cross Conflict)
+  const hasAspirinInPrescription = hasMed(prescriptionMeds, 'aspirin');
+  const hasNSAIDInPrescription =
+    hasMed(prescriptionMeds, 'ibuprofen') ||
+    hasMed(prescriptionMeds, 'diclofenac') ||
+    hasMed(prescriptionMeds, 'meloxicam');
+  const hasNSAIDInCabinet =
+    hasMed(cabinetMeds, 'ibuprofen') ||
+    hasMed(cabinetMeds, 'diclofenac') ||
+    hasMed(cabinetMeds, 'meloxicam');
+
+  if ((hasAspirinInPrescription || hasAspirinInCabinet) && (hasNSAIDInPrescription || hasNSAIDInCabinet)) {
+    const medA = hasAspirinInPrescription
+      ? getMedName(prescriptionMeds, 'aspirin', 'Aspirin')
+      : 'Aspirin 81mg';
+    const medB = hasNSAIDInPrescription
+      ? getMedName(prescriptionMeds, 'ibuprofen', getMedName(prescriptionMeds, 'diclofenac', 'Ibuprofen'))
+      : getMedName(cabinetMeds, 'ibuprofen', 'Ibuprofen');
+
+    if (!warnings.some((w) => w.id === 'warn-aspirin-nsaid')) {
+      warnings.push({
+        id: 'warn-aspirin-nsaid',
+        source: hasAspirinInPrescription && hasNSAIDInPrescription ? 'internal_prescription' : 'cabinet_conflict',
+        medicineA: medA,
+        medicineB: medB,
+        severity: 'critical',
+        description: 'Dùng cùng NSAID làm tăng gấp 3 lần nguy cơ loét dạ dày, xuất huyết tiêu hóa và làm mất tác dụng chống đông bảo vệ tim của Aspirin.',
+        clinicalRecommendation: 'Tránh phối hợp. Nếu bắt buộc cần bổ sung thuốc bảo vệ dạ dày PPI và tham khảo ý kiến bác sĩ tim mạch.',
+      });
+    }
+  }
+
+  // 4. Omeprazol + Clopidogrel (Plavix)
+  const hasOmeprazol = hasMed(prescriptionMeds, 'omeprazol') || hasMed(cabinetMeds, 'omeprazol');
+  const hasClopidogrel = hasMed(prescriptionMeds, 'clopidogrel') || hasMed(cabinetMeds, 'clopidogrel');
+  if (hasOmeprazol && hasClopidogrel) {
+    if (!warnings.some((w) => w.id === 'warn-omeprazol-clopidogrel')) {
+      warnings.push({
+        id: 'warn-omeprazol-clopidogrel',
+        source: hasMed(prescriptionMeds, 'omeprazol') && hasMed(prescriptionMeds, 'clopidogrel') ? 'internal_prescription' : 'cabinet_conflict',
+        medicineA: getMedName(prescriptionMeds, 'omeprazol', 'Omeprazol 20mg'),
+        medicineB: getMedName(prescriptionMeds, 'clopidogrel', 'Clopidogrel 75mg'),
+        severity: 'high',
+        description: 'Omeprazol ức chế men gan CYP2C19 làm giảm nồng độ dạng có hoạt tính của Clopidogrel, làm tăng nguy cơ cục máu đông tắc mạch.',
+        clinicalRecommendation: 'Nên thay thế Omeprazol bằng Pantoprazol để tránh tương tác enzyme gan.',
+      });
+    }
+  }
+
+  // 5. Paracetamol trùng hoạt chất (Trùng liều độc gan)
+  const paraCount = prescriptionMeds.filter(
+    (m) =>
+      m.name.toLowerCase().includes('paracetamol') ||
+      m.name.toLowerCase().includes('panadol') ||
+      m.name.toLowerCase().includes('efferalgan') ||
+      (m.activeIngredient && m.activeIngredient.toLowerCase().includes('paracetamol'))
+  ).length;
+  if (paraCount >= 2) {
+    if (!warnings.some((w) => w.id === 'warn-paracetamol-overdose')) {
+      warnings.push({
+        id: 'warn-paracetamol-overdose',
+        source: 'internal_prescription',
+        medicineA: 'Thuốc hạ sốt Paracetamol',
+        medicineB: 'Thuốc giảm đau phối hợp',
+        severity: 'critical',
+        description: 'Phát hiện 2 thuốc có cùng hoạt chất Paracetamol. Uống đồng thời dễ gây quá liều cấp tính (>4g/ngày) dẫn đến hoại tử tế bào gan.',
+        clinicalRecommendation: 'Chỉ chọn dùng 1 loại duy nhất. Đọc kỹ thành phần các thuốc cảm cúm tổng hợp.',
+      });
+    }
+  }
+
+  // 6. Amlodipine + Simvastatin liều cao
+  const hasAmlodipine = hasMed(prescriptionMeds, 'amlodipine') || hasMed(cabinetMeds, 'amlodipine');
+  const hasSimvastatin = hasMed(prescriptionMeds, 'simvastatin') || hasMed(cabinetMeds, 'simvastatin');
+  if (hasAmlodipine && hasSimvastatin) {
+    if (!warnings.some((w) => w.id === 'warn-amlodipine-simvastatin')) {
+      warnings.push({
+        id: 'warn-amlodipine-simvastatin',
+        source: 'cabinet_conflict',
+        medicineA: 'Amlodipine 5mg',
+        medicineB: 'Simvastatin',
+        severity: 'moderate',
+        description: 'Amlodipine làm tăng nồng độ Simvastatin trong máu, làm tăng nguy cơ đau cơ và tiêu cơ vân.',
+        clinicalRecommendation: 'Không dùng Simvastatin quá 20mg/ngày khi đang uống Amlodipine.',
+      });
+    }
   }
 
   return warnings;

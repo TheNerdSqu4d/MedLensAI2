@@ -43,6 +43,10 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "supabaseUrl": "https://vlaqqwizwcbigyfvbmff.supabase.co",
+      "supabaseAnonKey": "sb_publishable_foB0bAWjJw3v3bStAfVkJg_bV6TH7Mw"
     }
   }
 }

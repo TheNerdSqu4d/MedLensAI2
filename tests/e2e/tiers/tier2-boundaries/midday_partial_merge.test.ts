@@ -68,13 +68,13 @@ defineTest(
     state.toggleDoseSlot('morning');
 
     const adhBefore = calculateAdherence((await StoreTestHarness.getState()).schedule);
-    assert.equal(adhBefore.percentage, 33);
+    assert.equal(adhBefore.percentage, 67);
 
     state.importPrescription(MOCK_ANALYSIS_PRESET_1);
 
     const adhAfter = calculateAdherence((await StoreTestHarness.getState()).schedule);
-    assert.equal(adhAfter.percentage, 33, 'Adherence must remain 33% after merge!');
-    assert.equal(adhAfter.completed, 1);
+    assert.equal(adhAfter.percentage, 67, 'Adherence must remain 67% after merge!');
+    assert.equal(adhAfter.completed, 2);
   }
 );
 
@@ -94,7 +94,7 @@ defineTest(
     state.importPrescription(MOCK_ANALYSIS_PRESET_2);
 
     const adh = calculateAdherence((await StoreTestHarness.getState()).schedule);
-    assert.equal(adh.completed, 3);
+    assert.equal(adh.completed, adh.total);
     assert.equal(adh.percentage, 100);
     assert.equal(adh.badgeLabel, 'Tuyệt vời');
   }

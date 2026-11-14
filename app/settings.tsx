@@ -10,6 +10,7 @@ import {
   Platform,
   Keyboard,
   Switch,
+  Image,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
@@ -60,6 +61,7 @@ export default function SettingsScreen() {
   const familyMembers = useMedStore((state) => state.familyMembers) || [];
   const addFamilyMember = useMedStore((state) => state.addFamilyMember);
   const updateHealthProfile = useMedStore((state) => state.updateHealthProfile);
+  const updateMemberMealTimes = useMedStore((state) => state.updateMemberMealTimes);
   const resetToDemo = useMedStore((state) => state.resetToDemo);
   const mealTimes = useMedStore((state) => state.mealTimes) || { breakfast: '07:00', lunch: '12:00', dinner: '19:00' };
   const setMealTimes = useMedStore((state) => state.setMealTimes);
@@ -84,7 +86,10 @@ export default function SettingsScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch {}
     setEditingMealKey(key);
-    const existing = mealTimes[key] || (key === 'breakfast' ? '07:00' : key === 'lunch' ? '12:00' : '19:00');
+    const existing =
+      selectedMember?.mealTimes?.[key] ||
+      mealTimes[key] ||
+      (key === 'breakfast' ? '07:00' : key === 'lunch' ? '12:00' : '19:00');
     let h = 7;
     let m = 0;
     if (existing && existing.includes(':')) {
@@ -122,7 +127,24 @@ export default function SettingsScreen() {
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {}
-    setMealTimes({ [editingMealKey]: timeToSave });
+
+    if (selectedMember && updateMemberMealTimes) {
+      updateMemberMealTimes(selectedMember.id, { [editingMealKey]: timeToSave });
+      setSelectedMember((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          mealTimes: {
+            ...(prev.mealTimes || { breakfast: '07:00', lunch: '12:00', dinner: '19:00' }),
+            [editingMealKey]: timeToSave,
+          },
+        };
+      });
+      setProfileForm((prev) => ({ ...prev, [editingMealKey]: timeToSave }));
+    } else {
+      setMealTimes({ [editingMealKey]: timeToSave });
+    }
+
     setIsMealModalVisible(false);
   };
 
@@ -151,30 +173,28 @@ export default function SettingsScreen() {
   const [isAddMemberVisible, setIsAddMemberVisible] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRelation, setNewMemberRelation] = useState('');
+  const [newMemberAllergies, setNewMemberAllergies] = useState('');
+  const [newMemberMorningTime, setNewMemberMorningTime] = useState('07:30');
+  const [newMemberNoonTime, setNewMemberNoonTime] = useState('12:30');
+  const [newMemberEveningTime, setNewMemberEveningTime] = useState('20:00');
 
   // Health Profile Sheet State
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState<{
-    bloodType: string;
-    bloodPressure: string;
-    bloodSugar: string;
-    weight: string;
-    height: string;
+    breakfast: string;
+    lunch: string;
+    dinner: string;
     chronicConditions: string;
     allergies: string;
     doctorNotes: string;
-    emergencyContact: string;
   }>({
-    bloodType: 'O+',
-    bloodPressure: '120/80 mmHg',
-    bloodSugar: '5.5 mmol/L',
-    weight: '65 kg',
-    height: '168 cm',
+    breakfast: '07:00',
+    lunch: '12:00',
+    dinner: '19:00',
     chronicConditions: '',
     allergies: '',
     doctorNotes: '',
-    emergencyContact: '',
   });
 
   const handleBack = () => {
@@ -226,9 +246,40 @@ export default function SettingsScreen() {
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {}
-    addFamilyMember(newMemberName.trim(), newMemberRelation.trim() || 'Thành viên');
+
+    const allergiesList = newMemberAllergies.trim()
+      ? [newMemberAllergies.trim()]
+      : ['Chưa ghi nhận dị ứng thuốc'];
+
+    const memberMealTimes: MealTimes = {
+      breakfast: newMemberMorningTime.trim() || '07:30',
+      lunch: newMemberNoonTime.trim() || '12:30',
+      dinner: newMemberEveningTime.trim() || '20:00',
+    };
+
+    const memberHealthProfile: HealthProfile = {
+      bloodType: 'Chưa rõ',
+      dobYear: 1995,
+      gender: 'Khác',
+      chronicConditions: [],
+      allergies: allergiesList,
+      metrics: {},
+      doctorNotes: 'Hồ sơ thành viên gia đình.',
+    };
+
+    addFamilyMember(
+      newMemberName.trim(),
+      newMemberRelation.trim() || 'Thành viên',
+      memberHealthProfile,
+      memberMealTimes
+    );
+
     setNewMemberName('');
     setNewMemberRelation('');
+    setNewMemberAllergies('');
+    setNewMemberMorningTime('07:30');
+    setNewMemberNoonTime('12:30');
+    setNewMemberEveningTime('20:00');
     setIsAddMemberVisible(false);
   };
 
@@ -241,16 +292,14 @@ export default function SettingsScreen() {
     setIsEditingProfile(false);
 
     const profile = member.healthProfile;
+    const memberMeal = member.mealTimes || { breakfast: '07:00', lunch: '12:00', dinner: '19:00' };
     setProfileForm({
-      bloodType: profile?.bloodType || 'O+',
-      bloodPressure: profile?.metrics?.bloodPressure || '120/80 mmHg',
-      bloodSugar: profile?.metrics?.bloodSugar || '5.5 mmol/L',
-      weight: profile?.metrics?.weight || '64 kg',
-      height: profile?.metrics?.height || '168 cm',
+      breakfast: memberMeal.breakfast || '07:00',
+      lunch: memberMeal.lunch || '12:00',
+      dinner: memberMeal.dinner || '19:00',
       chronicConditions: (profile?.chronicConditions || []).join(', '),
       allergies: (profile?.allergies || []).join(', '),
       doctorNotes: profile?.doctorNotes || '',
-      emergencyContact: profile?.emergencyContact || '',
     });
   };
 
@@ -261,7 +310,6 @@ export default function SettingsScreen() {
     } catch {}
 
     const updatedProfile: Partial<HealthProfile> = {
-      bloodType: profileForm.bloodType.trim() || 'Chưa rõ',
       chronicConditions: profileForm.chronicConditions
         .split(',')
         .map((s) => s.trim())
@@ -271,29 +319,28 @@ export default function SettingsScreen() {
         .map((s) => s.trim())
         .filter(Boolean),
       doctorNotes: profileForm.doctorNotes.trim(),
-      emergencyContact: profileForm.emergencyContact.trim(),
-      metrics: {
-        bloodPressure: profileForm.bloodPressure.trim(),
-        bloodSugar: profileForm.bloodSugar.trim(),
-        weight: profileForm.weight.trim(),
-        height: profileForm.height.trim(),
-      },
+    };
+
+    const updatedMealTimes: MealTimes = {
+      breakfast: profileForm.breakfast.trim() || '07:00',
+      lunch: profileForm.lunch.trim() || '12:00',
+      dinner: profileForm.dinner.trim() || '19:00',
     };
 
     updateHealthProfile(selectedMember.id, updatedProfile);
+    if (updateMemberMealTimes) {
+      updateMemberMealTimes(selectedMember.id, updatedMealTimes);
+    }
 
     // Update current selected member locally
     setSelectedMember((prev) => {
       if (!prev) return null;
       return {
         ...prev,
+        mealTimes: updatedMealTimes,
         healthProfile: {
           ...(prev.healthProfile || { chronicConditions: [], allergies: [] }),
           ...updatedProfile,
-          metrics: {
-            ...(prev.healthProfile?.metrics || {}),
-            ...(updatedProfile.metrics || {}),
-          },
         },
       };
     });
@@ -401,79 +448,7 @@ export default function SettingsScreen() {
         </View>
 
         {/* ========================================================= */}
-        {/* MỤC 2: CÀI ĐẶT GIỜ BỮA ĂN (MEAL TIMES)                    */}
-        {/* ========================================================= */}
-        <View className="flex-row items-center justify-between px-3 mb-2">
-          <Text className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            CÀI ĐẶT GIỜ BỮA ĂN (MEAL TIMES)
-          </Text>
-          <Text className="text-3xs font-medium text-slate-400">Đồng bộ cữ uống thuốc</Text>
-        </View>
-
-        <View className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-2xs mb-6">
-          {/* Bữa sáng */}
-          <Pressable
-            onPress={() => handleOpenMealPicker('breakfast')}
-            className="flex-row items-center justify-between p-4 border-b border-slate-100 active:bg-slate-50"
-          >
-            <View className="flex-row items-center gap-3">
-              <View className="size-9 rounded-2xl items-center justify-center bg-amber-50">
-                <Sun size={18} color="#D97706" />
-              </View>
-              <View>
-                <Text className="text-sm font-bold text-zinc-900">Bữa sáng</Text>
-                <Text className="text-2xs text-zinc-500">Gắn với Cữ Sáng uống thuốc</Text>
-              </View>
-            </View>
-            <View className="flex-row items-center gap-2">
-              <Badge label={mealTimes.breakfast || '07:00'} variant="primary" />
-              <ChevronRight size={18} color="#94A3B8" />
-            </View>
-          </Pressable>
-
-          {/* Bữa trưa */}
-          <Pressable
-            onPress={() => handleOpenMealPicker('lunch')}
-            className="flex-row items-center justify-between p-4 border-b border-slate-100 active:bg-slate-50"
-          >
-            <View className="flex-row items-center gap-3">
-              <View className="size-9 rounded-2xl items-center justify-center bg-orange-50">
-                <SunMedium size={18} color="#EA580C" />
-              </View>
-              <View>
-                <Text className="text-sm font-bold text-zinc-900">Bữa trưa</Text>
-                <Text className="text-2xs text-zinc-500">Gắn với Cữ Trưa uống thuốc</Text>
-              </View>
-            </View>
-            <View className="flex-row items-center gap-2">
-              <Badge label={mealTimes.lunch || '12:00'} variant="primary" />
-              <ChevronRight size={18} color="#94A3B8" />
-            </View>
-          </Pressable>
-
-          {/* Bữa tối */}
-          <Pressable
-            onPress={() => handleOpenMealPicker('dinner')}
-            className="flex-row items-center justify-between p-4 active:bg-slate-50"
-          >
-            <View className="flex-row items-center gap-3">
-              <View className="size-9 rounded-2xl items-center justify-center bg-indigo-50">
-                <Moon size={18} color="#4F46E5" />
-              </View>
-              <View>
-                <Text className="text-sm font-bold text-zinc-900">Bữa tối</Text>
-                <Text className="text-2xs text-zinc-500">Gắn với Cữ Tối uống thuốc</Text>
-              </View>
-            </View>
-            <View className="flex-row items-center gap-2">
-              <Badge label={mealTimes.dinner || '19:00'} variant="primary" />
-              <ChevronRight size={18} color="#94A3B8" />
-            </View>
-          </Pressable>
-        </View>
-
-        {/* ========================================================= */}
-        {/* MỤC 3: THÔNG BÁO NHẮC UỐNG THUỐC                          */}
+        {/* MỤC 2: THÔNG BÁO NHẮC UỐNG THUỐC                          */}
         {/* ========================================================= */}
         <View className="flex-row items-center justify-between px-3 mb-2">
           <Text className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
@@ -556,6 +531,32 @@ export default function SettingsScreen() {
               <Text className="text-xs font-semibold text-white">Thử ngay</Text>
             </View>
           </Pressable>
+        </View>
+
+        {/* ========================================================= */}
+        {/* MỤC 4: THÔNG TIN ỨNG DỤNG (CHỈ HIỆN PHIÊN BẢN)             */}
+        {/* ========================================================= */}
+        <View className="flex-row items-center justify-between px-3 mb-2">
+          <Text className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            THÔNG TIN ỨNG DỤNG
+          </Text>
+        </View>
+
+        <View className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-2xs mb-6">
+          <View className="flex-row items-center justify-between p-4">
+            <View className="flex-row items-center gap-3">
+              <Image
+                source={require('@/assets/images/icon.png')}
+                className="size-11 rounded-2xl border border-slate-100"
+                resizeMode="cover"
+              />
+              <View>
+                <Text className="text-sm font-bold text-zinc-900">MedLens AI</Text>
+                <Text className="text-2xs text-zinc-400 font-medium">Phiên bản 1.0.0</Text>
+              </View>
+            </View>
+            <Badge label="Chính thức" variant="primary" />
+          </View>
         </View>
 
         {/* Khôi phục demo */}
@@ -669,56 +670,80 @@ export default function SettingsScreen() {
               {/* --------------------------------------------------- */}
               {!isEditingProfile ? (
                 <View className="gap-3.5 pb-6">
-                  {/* Card 1: Chỉ số sinh hiệu & Thể trạng */}
+                  {/* Card 1: Giờ uống thuốc & Bữa ăn riêng từng thành viên */}
                   <Card className="p-4 bg-slate-50 border border-slate-200/70">
-                    <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2.5">
-                      CHỈ SỐ SINH HIỆU & THỂ CHẤT
-                    </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {/* Nhóm máu */}
-                      <View className="flex-1 min-w-[130px] p-3 rounded-2xl bg-white border border-slate-100 shadow-2xs">
-                        <View className="flex-row items-center gap-1.5 mb-1">
-                          <Droplets size={14} color="#DC2626" />
-                          <Text className="text-3xs font-bold uppercase text-slate-400">Nhóm Máu</Text>
-                        </View>
-                        <Text className="text-base font-extrabold text-red-600">
-                          {selectedMember?.healthProfile?.bloodType || 'Chưa rõ'}
-                        </Text>
-                      </View>
+                    <View className="flex-row items-center justify-between mb-2.5">
+                      <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                        GIỜ UỐNG THUỐC & BỮA ĂN (RIÊNG TỪNG THÀNH VIÊN)
+                      </Text>
+                      <Pressable
+                        onPress={() => setIsEditingProfile(true)}
+                        className="px-2 py-0.5 rounded-lg bg-blue-100 active:bg-blue-200"
+                      >
+                        <Text className="text-3xs font-semibold text-blue-700">Đổi giờ</Text>
+                      </Pressable>
+                    </View>
 
-                      {/* Huyết áp */}
-                      <View className="flex-1 min-w-[130px] p-3 rounded-2xl bg-white border border-slate-100 shadow-2xs">
-                        <View className="flex-row items-center gap-1.5 mb-1">
-                          <Activity size={14} color="#2563EB" />
-                          <Text className="text-3xs font-bold uppercase text-slate-400">Huyết Áp</Text>
+                    <View className="gap-2">
+                      {/* Bữa sáng */}
+                      <Pressable
+                        onPress={() => handleOpenMealPicker('breakfast')}
+                        className="flex-row items-center justify-between p-3 rounded-2xl bg-white border border-slate-200/70 active:bg-slate-50"
+                      >
+                        <View className="flex-row items-center gap-2.5">
+                          <View className="size-8 rounded-xl bg-amber-50 items-center justify-center">
+                            <Sun size={16} color="#D97706" />
+                          </View>
+                          <View>
+                            <Text className="text-xs font-bold text-zinc-800">Cữ sáng</Text>
+                            <Text className="text-3xs text-zinc-400">Gắn với bữa ăn sáng</Text>
+                          </View>
                         </View>
-                        <Text className="text-base font-extrabold text-blue-600">
-                          {selectedMember?.healthProfile?.metrics?.bloodPressure || '120/80 mmHg'}
-                        </Text>
-                      </View>
+                        <Badge
+                          label={selectedMember?.mealTimes?.breakfast || '07:00'}
+                          variant="primary"
+                        />
+                      </Pressable>
 
-                      {/* Đường huyết */}
-                      <View className="flex-1 min-w-[130px] p-3 rounded-2xl bg-white border border-slate-100 shadow-2xs">
-                        <View className="flex-row items-center gap-1.5 mb-1">
-                          <Heart size={14} color="#7C3AED" />
-                          <Text className="text-3xs font-bold uppercase text-slate-400">Đường Huyết</Text>
+                      {/* Bữa trưa */}
+                      <Pressable
+                        onPress={() => handleOpenMealPicker('lunch')}
+                        className="flex-row items-center justify-between p-3 rounded-2xl bg-white border border-slate-200/70 active:bg-slate-50"
+                      >
+                        <View className="flex-row items-center gap-2.5">
+                          <View className="size-8 rounded-xl bg-orange-50 items-center justify-center">
+                            <SunMedium size={16} color="#EA580C" />
+                          </View>
+                          <View>
+                            <Text className="text-xs font-bold text-zinc-800">Cữ trưa</Text>
+                            <Text className="text-3xs text-zinc-400">Gắn với bữa ăn trưa</Text>
+                          </View>
                         </View>
-                        <Text className="text-base font-extrabold text-purple-700">
-                          {selectedMember?.healthProfile?.metrics?.bloodSugar || '5.5 mmol/L'}
-                        </Text>
-                      </View>
+                        <Badge
+                          label={selectedMember?.mealTimes?.lunch || '12:00'}
+                          variant="primary"
+                        />
+                      </Pressable>
 
-                      {/* Cân nặng / Chiều cao */}
-                      <View className="flex-1 min-w-[130px] p-3 rounded-2xl bg-white border border-slate-100 shadow-2xs">
-                        <View className="flex-row items-center gap-1.5 mb-1">
-                          <User size={14} color="#059669" />
-                          <Text className="text-3xs font-bold uppercase text-slate-400">Thể Trạng</Text>
+                      {/* Bữa tối */}
+                      <Pressable
+                        onPress={() => handleOpenMealPicker('dinner')}
+                        className="flex-row items-center justify-between p-3 rounded-2xl bg-white border border-slate-200/70 active:bg-slate-50"
+                      >
+                        <View className="flex-row items-center gap-2.5">
+                          <View className="size-8 rounded-xl bg-indigo-50 items-center justify-center">
+                            <Moon size={16} color="#4F46E5" />
+                          </View>
+                          <View>
+                            <Text className="text-xs font-bold text-zinc-800">Cữ tối</Text>
+                            <Text className="text-3xs text-zinc-400">Gắn với bữa ăn tối</Text>
+                          </View>
                         </View>
-                        <Text className="text-sm font-bold text-zinc-800">
-                          {selectedMember?.healthProfile?.metrics?.weight || '64 kg'} •{' '}
-                          {selectedMember?.healthProfile?.metrics?.height || '168 cm'}
-                        </Text>
-                      </View>
+                        <Badge
+                          label={selectedMember?.mealTimes?.dinner || '19:00'}
+                          variant="primary"
+                        />
+                      </Pressable>
                     </View>
                   </Card>
 
@@ -776,74 +801,42 @@ export default function SettingsScreen() {
                         'Duy trì uống thuốc đúng cữ, ăn nhạt, vận động nhẹ nhàng và tái khám định kỳ.'}
                     </Text>
                   </Card>
-
-                  {/* Card 5: Liên hệ khẩn cấp */}
-                  {selectedMember?.healthProfile?.emergencyContact ? (
-                    <View className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-100 flex-row items-center justify-between">
-                      <View className="flex-row items-center gap-2">
-                        <Phone size={16} color="#2563EB" />
-                        <Text className="text-xs font-semibold text-blue-900">
-                          Liên hệ khẩn cấp: {selectedMember.healthProfile.emergencyContact}
-                        </Text>
-                      </View>
-                    </View>
-                  ) : null}
                 </View>
               ) : (
                 /* --------------------------------------------------- */
                 /* CHẾ ĐỘ 2: CHỈNH SỬA HỒ SƠ SỨC KHỎE                 */
                 /* --------------------------------------------------- */
                 <View className="gap-3 pb-6">
-                  <Input
-                    label="Nhóm máu"
-                    placeholder="VD: O+, A+, B+, AB+..."
-                    value={profileForm.bloodType}
-                    onChangeText={(val) => setProfileForm((prev) => ({ ...prev, bloodType: val }))}
-                  />
-
-                  <View className="flex-row gap-2">
-                    <View className="flex-1">
-                      <Input
-                        label="Huyết áp gần nhất"
-                        placeholder="VD: 125/80 mmHg"
-                        value={profileForm.bloodPressure}
-                        onChangeText={(val) =>
-                          setProfileForm((prev) => ({ ...prev, bloodPressure: val }))
-                        }
-                      />
-                    </View>
-                    <View className="flex-1">
-                      <Input
-                        label="Đường huyết"
-                        placeholder="VD: 5.6 mmol/L"
-                        value={profileForm.bloodSugar}
-                        onChangeText={(val) =>
-                          setProfileForm((prev) => ({ ...prev, bloodSugar: val }))
-                        }
-                      />
-                    </View>
-                  </View>
-
-                  <View className="flex-row gap-2">
-                    <View className="flex-1">
-                      <Input
-                        label="Cân nặng"
-                        placeholder="VD: 64 kg"
-                        value={profileForm.weight}
-                        onChangeText={(val) =>
-                          setProfileForm((prev) => ({ ...prev, weight: val }))
-                        }
-                      />
-                    </View>
-                    <View className="flex-1">
-                      <Input
-                        label="Chiều cao"
-                        placeholder="VD: 168 cm"
-                        value={profileForm.height}
-                        onChangeText={(val) =>
-                          setProfileForm((prev) => ({ ...prev, height: val }))
-                        }
-                      />
+                  {/* Cài đặt giờ bữa ăn / cữ uống riêng của thành viên */}
+                  <View className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-100 gap-2.5">
+                    <Text className="text-xs font-bold text-blue-900 uppercase">
+                      Giờ cữ uống thuốc riêng của {selectedMember?.name}
+                    </Text>
+                    <View className="flex-row gap-2">
+                      <View className="flex-1">
+                        <Input
+                          label="Cữ Sáng"
+                          placeholder="07:00"
+                          value={profileForm.breakfast}
+                          onChangeText={(val) => setProfileForm((prev) => ({ ...prev, breakfast: val }))}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <Input
+                          label="Cữ Trưa"
+                          placeholder="12:00"
+                          value={profileForm.lunch}
+                          onChangeText={(val) => setProfileForm((prev) => ({ ...prev, lunch: val }))}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <Input
+                          label="Cữ Tối"
+                          placeholder="19:00"
+                          value={profileForm.dinner}
+                          onChangeText={(val) => setProfileForm((prev) => ({ ...prev, dinner: val }))}
+                        />
+                      </View>
                     </View>
                   </View>
 
@@ -869,15 +862,6 @@ export default function SettingsScreen() {
                     value={profileForm.doctorNotes}
                     onChangeText={(val) =>
                       setProfileForm((prev) => ({ ...prev, doctorNotes: val }))
-                    }
-                  />
-
-                  <Input
-                    label="Số điện thoại khẩn cấp"
-                    placeholder="VD: 0912 345 678"
-                    value={profileForm.emergencyContact}
-                    onChangeText={(val) =>
-                      setProfileForm((prev) => ({ ...prev, emergencyContact: val }))
                     }
                   />
 
@@ -944,7 +928,7 @@ export default function SettingsScreen() {
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={{ paddingBottom: 16 }}
               >
-                <View className="gap-3 mb-5">
+                <View className="gap-3.5 mb-5">
                   <Input
                     label="Họ và tên *"
                     placeholder="VD: Bố, Mẹ, Con trai..."
@@ -957,6 +941,45 @@ export default function SettingsScreen() {
                     value={newMemberRelation}
                     onChangeText={setNewMemberRelation}
                   />
+                  <Input
+                    label="Kỵ thuốc / Dị ứng thuốc (Tự điền nếu cần)"
+                    placeholder="VD: Dị ứng Penicillin, Aspirin, Sulfamide..."
+                    value={newMemberAllergies}
+                    onChangeText={setNewMemberAllergies}
+                  />
+
+                  {/* Giờ uống thuốc cụ thể từng cữ */}
+                  <View className="gap-1.5 mt-1">
+                    <Text className="text-xs font-bold uppercase tracking-wider text-zinc-600 px-1">
+                      Giờ uống thuốc cụ thể từng cữ:
+                    </Text>
+                    <View className="flex-row gap-2">
+                      <View className="flex-1">
+                        <Input
+                          label="Cữ Sáng"
+                          placeholder="07:30"
+                          value={newMemberMorningTime}
+                          onChangeText={setNewMemberMorningTime}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <Input
+                          label="Cữ Trưa"
+                          placeholder="12:30"
+                          value={newMemberNoonTime}
+                          onChangeText={setNewMemberNoonTime}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <Input
+                          label="Cữ Tối"
+                          placeholder="20:00"
+                          value={newMemberEveningTime}
+                          onChangeText={setNewMemberEveningTime}
+                        />
+                      </View>
+                    </View>
+                  </View>
                 </View>
 
                 <Button
